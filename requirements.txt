@@ -1,0 +1,13 @@
+# Genesis 側（Python 3.12 の venv）の依存。ROS2 側は apt / rosdep で管理する。
+# Genesis は Python <3.14 が必須のため、ROS2（rclpy, Python 3.14）とは別プロセスで動かす。
+#
+# セットアップ:
+#   uv venv --python 3.12 .venv
+#   VIRTUAL_ENV=.venv uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+#   VIRTUAL_ENV=.venv uv pip install -r requirements.txt
+#
+# 動作確認環境: RTX 5070 Ti (sm_120) / NVIDIA driver 615.71.09 / Ubuntu 26.04
+# 画面の無い環境で録画するときは PYOPENGL_PLATFORM=egl を付ける。
+genesis-world==1.4.5
+rsl-rl-lib==5.5.2
+tensorboard==2.21.0

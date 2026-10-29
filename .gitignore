@@ -1,0 +1,56 @@
+# ============================================================
+# public リポジトリに「入れない」もの → Drive にバックアップする
+#   バックアップ先: Physical AI講座 2026 応用編1 / pai2026-adv01-final-backup
+#   (運用詳細は CLAUDE.md 参照。CLAUDE.md 自身も公開しない)
+# ============================================================
+CLAUDE.md
+notes/
+video/
+
+# ---- 個人情報・秘密情報（public なので絶対に入れない）----
+.env
+*.key
+*.pem
+secrets/
+*_token*
+*omnitok*
+
+# ---- 大容量・生成物（GitHub の 100MB 制限回避 + 再生成可能）----
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.zip
+*.tar
+*.tar.gz
+data/
+logs/
+outputs/
+checkpoints/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- ROS2 ビルド成果物 ----
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# ---- OS / エディタ ----
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# ---- 外部リポジトリ（参照用 clone。必要なファイルだけ出典付きでコピーする）----
+third_party/
