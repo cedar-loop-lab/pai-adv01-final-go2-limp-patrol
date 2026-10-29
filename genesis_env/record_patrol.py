@@ -1,7 +1,7 @@
 """動画用: 1台の Go2 が巡回中に1脚のトルク上限が下がり、帰還するまでを録画する。
 
 劣化はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
-劣化した脚は、3D の赤い目印（股・膝・足先）と、左下の脚の配置図で示す。
+劣化した脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
 1回の試行を録るだけで、評価の結果ではない。出力は video/（Git 管理外）。
 """
 
@@ -30,8 +30,6 @@ MARKER_COLOR = (1.0, 0.1, 0.1, 0.85)
 # 脚の上に立てる下向きの矢印（胴体に隠れても見えるように）
 ARROW_HEIGHT_M = 0.45
 ARROW_LENGTH_M = 0.25
-# 脚の配置図（上から見た図、前が上）での各脚の位置 [px]。FR は右前。
-LEG_MAP_XY = {"FL": (-1, -1), "FR": (1, -1), "RL": (-1, 1), "RR": (1, 1)}
 
 
 def leg_points(env, link_idx: list[int]) -> np.ndarray:
@@ -52,25 +50,8 @@ def draw_leg_marker(scene, points: np.ndarray) -> None:
     scene.draw_debug_arrow(arrow_start, vec=(0.0, 0.0, -ARROW_LENGTH_M), radius=0.02, color=MARKER_COLOR)
 
 
-def draw_leg_map(image: Image.Image, faulty_leg: str | None, font) -> None:
-    """左下に、上から見た脚の配置図を描く。劣化した脚を赤で塗る。"""
-    draw = ImageDraw.Draw(image)
-    cx, cy, dx, dy, r = 70, image.height - 80, 26, 40, 13
-    draw.rectangle((cx - 18, cy - 46, cx + 18, cy + 46), fill=(70, 70, 80), outline=(230, 230, 230), width=2)
-    draw.text((cx - 10, cy - 80), "前", fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
-    for name, (sx, sy) in LEG_MAP_XY.items():
-        x, y = cx + sx * dx, cy + sy * dy
-        color = (255, 40, 40) if name == faulty_leg else (150, 220, 150)
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=color, outline=(0, 0, 0), width=2)
-    legend = "赤 = トルク上限が下がった脚" if faulty_leg else "全脚 正常"
-    draw.text((cx + 50, cy - 10), legend, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
-
-
-def draw_overlay(
-    frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]], faulty_leg: str | None, font
-) -> np.ndarray:
+def draw_overlay(frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]], font) -> np.ndarray:
     image = Image.fromarray(frame)
-    draw_leg_map(image, faulty_leg, font)
     draw = ImageDraw.Draw(image)
     y = 8
     for text, color in lines:
@@ -140,8 +121,7 @@ def main() -> None:
                     lines.append((f"転倒（{fallen_t:.1f} s）", (255, 90, 90)))
                 elif not math.isnan(done_t):
                     lines.append((f"帰還完了（劣化から {done_t - onset_t:.1f} s）", (120, 200, 255)))
-                faulty_leg = None if math.isnan(onset_t) else args.leg
-                frames.append(draw_overlay(rgb, lines, faulty_leg, font))
+                frames.append(draw_overlay(rgb, lines, font))
 
             is_over = not math.isnan(fallen_t) and t > fallen_t + AFTER_DONE_S
             is_over |= not math.isnan(done_t) and t > done_t + AFTER_DONE_S
