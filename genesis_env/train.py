@@ -1,5 +1,6 @@
 # Derived from Genesis v1.4.5 examples/locomotion/go2_train.py (Apache-2.0, Copyright Genesis-Embodied-AI).
-# Changes: --variant for the command range, explicit torch seed, logs under the repository root.
+# Changes: --variant for the command range, explicit torch seed, logs under the repository root,
+# --history-len and --degradation for the nominal / degradation-trained comparison.
 import argparse
 import os
 import pickle
@@ -11,7 +12,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
-from configs import get_cfgs, get_train_cfg
+from configs import HISTORY_LEN, get_cfgs, get_train_cfg
 from envs.go2_env import Go2Env
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -24,10 +25,12 @@ def main() -> None:
     parser.add_argument("-b", "--num-envs", type=int, default=4096)
     parser.add_argument("--max-iterations", type=int, default=500)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--history-len", type=int, default=HISTORY_LEN, help="Observation history steps")
+    parser.add_argument("--degradation", action="store_true", help="Randomly lower one leg's torque limits")
     args = parser.parse_args()
 
     log_dir = REPO_ROOT / "logs" / args.exp_name
-    env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs(args.variant)
+    env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs(args.variant, args.history_len, args.degradation)
     train_cfg = get_train_cfg(args.exp_name)
 
     if log_dir.exists():

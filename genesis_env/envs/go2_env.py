@@ -1,5 +1,6 @@
 # Derived from Genesis v1.4.5 examples/locomotion/go2_env.py (Apache-2.0, Copyright Genesis-Embodied-AI).
-# Changes: per-env joint torque limits (degradation model), zero-command sampling for stand-still.
+# Changes: per-env joint torque limits (degradation model), zero-command sampling for stand-still,
+# observation history, random torque-limit degradation during training.
 import math
 
 import torch
@@ -96,6 +97,20 @@ class Go2Env:
         self.torque_limit = self.nominal_torque_limit.repeat(self.num_envs, 1)
         self.has_degradation = False
 
+        # 学習時の劣化（env_cfg["degradation"] が None なら入れない。評価では外から set_torque_limit で入れる）
+        self.degradation_cfg = self.env_cfg.get("degradation")
+        if self.degradation_cfg is not None:
+            self.reference_torque = torch.tensor(
+                self.degradation_cfg["reference_torque"], dtype=gs.tc_float, device=gs.device
+            )
+            self.fault_limit = self.nominal_torque_limit.repeat(self.num_envs, 1)
+            # 劣化が起きるステップ（episode_length_buf と比べる）。劣化しないエピソードは -1。
+            self.fault_onset_step = torch.full((self.num_envs,), -1, dtype=gs.tc_int, device=gs.device)
+
+        # 観測の履歴（古い順）。方策には (history_len × 1ステップ分) を平らにつないで渡す。
+        self.history_len = self.obs_cfg.get("history_len", 1)
+        self.obs_history = None
+
         # Define global gravity direction vector
         self.global_gravity = torch.tensor([0.0, 0.0, -1.0], dtype=gs.tc_float, device=gs.device)
 
@@ -176,6 +191,32 @@ class Go2Env:
         self.robot.set_dofs_force_range(-self.torque_limit, self.torque_limit, self.motors_dof_idx)
         self.has_degradation = bool((self.torque_limit < self.nominal_torque_limit).any())
 
+    def _sample_degradation(self, envs_idx):
+        # エピソードごとに、劣化するか・どの脚か・強さ s・発生ステップを選び直す
+        cfg = self.degradation_cfg
+        n = self.num_envs
+        has_fault = torch.rand(n, device=gs.device) < cfg["prob"]
+        leg = torch.randint(0, 4, (n,), device=gs.device)
+        s = torch.empty(n, device=gs.device).uniform_(*cfg["s_range"])
+        onset = torch.randint(0, self.max_episode_length, (n,), dtype=gs.tc_int, device=gs.device)
+
+        is_leg_joint = (torch.arange(self.num_actions, device=gs.device)[None] // 3) == leg[:, None]
+        is_fault_joint = has_fault[:, None] & is_leg_joint
+        degraded = torch.minimum(s[:, None] * self.reference_torque, self.nominal_torque_limit)
+        limit = torch.where(is_fault_joint, degraded, self.nominal_torque_limit)
+        onset = torch.where(has_fault, onset, -1)
+        if envs_idx is None:
+            self.fault_limit.copy_(limit)
+            self.fault_onset_step.copy_(onset)
+        else:
+            torch.where(envs_idx[:, None], limit, self.fault_limit, out=self.fault_limit)
+            torch.where(envs_idx, onset, self.fault_onset_step, out=self.fault_onset_step)
+
+    def _apply_scheduled_degradation(self):
+        is_onset = self.episode_length_buf == self.fault_onset_step
+        if bool(is_onset.any()):
+            self.set_torque_limit(self.fault_limit, is_onset)
+
     def _resample_commands(self, envs_idx):
         commands = gs_rand(*self.commands_limits, (self.num_envs,))
         # 停止も運転範囲に含めるため、一定の割合で指令をゼロにする
@@ -189,6 +230,8 @@ class Go2Env:
             torch.where(envs_idx[:, None], commands, self.commands, out=self.commands)
 
     def step(self, actions):
+        if self.degradation_cfg is not None:
+            self._apply_scheduled_degradation()
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
         target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
@@ -292,9 +335,11 @@ class Go2Env:
 
         # random sample command upon reset
         self._resample_commands(envs_idx)
+        if self.degradation_cfg is not None:
+            self._sample_degradation(envs_idx)
 
     def _update_observation(self):
-        self.obs_buf = torch.concatenate(
+        current = torch.concatenate(
             (
                 self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
                 self.projected_gravity,  # 3
@@ -305,6 +350,14 @@ class Go2Env:
             ),
             dim=-1,
         )
+        # リセットした env は履歴を現在の観測で埋める（前のエピソードの観測を残さない）
+        filled = current[:, None].expand(-1, self.history_len, -1)
+        if self.obs_history is None:
+            self.obs_history = filled.clone()
+        else:
+            shifted = torch.cat((self.obs_history[:, 1:], current[:, None]), dim=1)
+            self.obs_history = torch.where(self.reset_buf[:, None, None], filled, shifted)
+        self.obs_buf = self.obs_history.flatten(1)
 
     def reset(self):
         self._reset_idx()

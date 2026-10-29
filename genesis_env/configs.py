@@ -1,5 +1,6 @@
 # Derived from Genesis v1.4.5 examples/locomotion/go2_train.py (Apache-2.0, Copyright Genesis-Embodied-AI).
-# Changes: configs split out of the training script, command-range variants for patrol.
+# Changes: configs split out of the training script, command-range variants for patrol, observation history,
+# torque-limit degradation during training.
 
 # 指令範囲。official は公式サンプルのまま（前進 0.5 m/s 固定、旋回なし）。
 # patrol は巡回・旋回・停止・帰還に必要な範囲（前進 0〜1.0 m/s、旋回 ±1.0 rad/s、1割は停止）。
@@ -17,6 +18,27 @@ COMMAND_VARIANTS = {
         "zero_command_prob": 0.1,
     },
 }
+
+
+# 劣化の強さ s の共通基準 [Nm]（joint_names の順）。go2-patrol-s1 の正常時の関節別 p95 トルク
+# （logs/go2-patrol-s1/envelope.json、2026-10-30）を固定値として写したもの。全方式・全シードで同じ値を使う。
+REFERENCE_TORQUE_NM = (
+    8.775196075439453, 13.417834281921387, 15.17480754852295,  # FR hip / thigh / calf
+    8.11659049987793, 15.104951858520508, 13.749022483825684,  # FL
+    7.912249565124512, 8.110267639160156, 11.3601713180542,  # RR
+    8.739553451538086, 7.935779571533203, 11.480952262878418,  # RL
+)
+
+# 学習時の劣化（8章で確定）: エピソードごとに確率 prob でランダムな1脚の3関節の上限を
+# min(s × 共通基準, 元の上限) に下げる。s ~ U[s_range]、発生はエピソード中の一様な時刻。
+TRAIN_DEGRADATION = {
+    "prob": 0.5,
+    "s_range": [0.35, 1.0],
+    "reference_torque": list(REFERENCE_TORQUE_NM),
+}
+
+# 観測の履歴長（直近のステップ数）。通常版・提案版で同じ値を使う。
+HISTORY_LEN = 10
 
 
 def get_train_cfg(exp_name: str) -> dict:
@@ -62,7 +84,9 @@ def get_train_cfg(exp_name: str) -> dict:
     }
 
 
-def get_cfgs(command_variant: str) -> tuple[dict, dict, dict, dict]:
+def get_cfgs(
+    command_variant: str, history_len: int = 1, has_degradation: bool = False
+) -> tuple[dict, dict, dict, dict]:
     if command_variant not in COMMAND_VARIANTS:
         raise ValueError(f"unknown command variant: {command_variant} (choose from {sorted(COMMAND_VARIANTS)})")
 
@@ -111,8 +135,10 @@ def get_cfgs(command_variant: str) -> tuple[dict, dict, dict, dict]:
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
+        "degradation": dict(TRAIN_DEGRADATION) if has_degradation else None,
     }
     obs_cfg = {
+        "history_len": history_len,
         "obs_scales": {
             "lin_vel": 2.0,
             "ang_vel": 0.25,
