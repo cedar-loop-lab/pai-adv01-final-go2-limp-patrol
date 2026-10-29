@@ -18,7 +18,9 @@ FALL_BASE_Z = 0.15
 INIT_JOINT_NOISE_RAD = 0.1
 
 
-def load_env_and_policy(exp_name: str, ckpt: int, num_envs: int, duration_s: float, seed: int):
+def load_env_and_policy(
+    exp_name: str, ckpt: int, num_envs: int, duration_s: float, seed: int, camera_res: tuple[int, int] | None = None
+):
     """評価用の環境と推論用の方策を返す。自動リセットと指令の再抽選は止める（転倒は is_fallen で判定）。"""
     log_dir = REPO_ROOT / "logs" / exp_name
     with open(log_dir / "cfgs.pkl", "rb") as f:
@@ -33,7 +35,14 @@ def load_env_and_policy(exp_name: str, ckpt: int, num_envs: int, duration_s: flo
 
     torch.manual_seed(seed)
     gs.init(backend=gs.gpu, precision="32", logging_level="warning", seed=seed)
-    env = Go2Env(num_envs=num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg)
+    env = Go2Env(
+        num_envs=num_envs,
+        env_cfg=env_cfg,
+        obs_cfg=obs_cfg,
+        reward_cfg=reward_cfg,
+        command_cfg=command_cfg,
+        camera_res=camera_res,
+    )
     runner = OnPolicyRunner(env, train_cfg, str(log_dir), device=gs.device)
     runner.load(str(log_dir / f"model_{ckpt}.pt"))
     return env, runner.get_inference_policy(device=gs.device), log_dir

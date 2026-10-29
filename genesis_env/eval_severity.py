@@ -28,10 +28,14 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--seed", type=int, default=200)
+    # 開発中の比較は検証用の強さ（0.6, 0.45）だけで行う。最終テストの強さはここで使わない。
+    parser.add_argument("--severities", type=float, nargs="+", default=SEVERITIES)
+    parser.add_argument("--tag", type=str, default="", help="Suffix for the output file name")
     args = parser.parse_args()
+    severities = args.severities
 
     ref = json.loads((REPO_ROOT / "logs" / args.ref_exp / "envelope.json").read_text())
-    conditions = [(s, leg, cmd) for s in SEVERITIES for leg in range(4) for cmd in COMMANDS]
+    conditions = [(s, leg, cmd) for s in severities for leg in range(4) for cmd in COMMANDS]
     num_envs = len(conditions) * args.trials
     env, policy, log_dir = load_env_and_policy(args.exp_name, args.ckpt, num_envs, args.duration, args.seed)
 
@@ -67,6 +71,7 @@ def main() -> None:
         "exp": args.exp_name,
         "ckpt": args.ckpt,
         "ref_exp": args.ref_exp,
+        "severities": severities,
         "trials": args.trials,
         "onset_s": ONSET_S,
         "duration_s": args.duration,
@@ -77,19 +82,19 @@ def main() -> None:
     }
 
     n_cmd = len(COMMANDS)
-    fall_grid = fall.view(len(SEVERITIES), 4, n_cmd)
-    ratio_grid = ratio.view(len(SEVERITIES), 4, n_cmd)
+    fall_grid = fall.view(len(severities), 4, n_cmd)
+    ratio_grid = ratio.view(len(severities), 4, n_cmd)
     print("fall rate by severity x leg (mean over commands) | vx ratio (mean over legs/commands)")
     print(f"{'s':>5} | " + " ".join(f"{leg:>5}" for leg in LEG_NAMES) + " |  vx_ratio")
-    for i_s, s in enumerate(SEVERITIES):
+    for i_s, s in enumerate(severities):
         legs = " ".join(f"{v:5.2f}" for v in fall_grid[i_s].mean(dim=1).tolist())
         print(f"{s:5.2f} | {legs} |  {ratio_grid[i_s].mean().item():6.2f}")
     print("fall rate by severity x command (mean over legs)")
     print(f"{'s':>5} | " + " ".join(f"{f'{vx}/{yaw}':>9}" for vx, yaw in COMMANDS))
-    for i_s, s in enumerate(SEVERITIES):
+    for i_s, s in enumerate(severities):
         print(f"{s:5.2f} | " + " ".join(f"{v:9.2f}" for v in fall_grid[i_s].mean(dim=0).tolist()))
 
-    out = log_dir / f"severity_ref-{args.ref_exp}.json"
+    out = log_dir / f"severity_ref-{args.ref_exp}{args.tag}.json"
     out.write_text(json.dumps(result, indent=2))
     print(f"saved {out}")
 

@@ -1,6 +1,6 @@
 # Derived from Genesis v1.4.5 examples/locomotion/go2_env.py (Apache-2.0, Copyright Genesis-Embodied-AI).
 # Changes: per-env joint torque limits (degradation model), zero-command sampling for stand-still,
-# observation history, random torque-limit degradation during training.
+# observation history, random torque-limit degradation during training, optional recording camera.
 import math
 
 import torch
@@ -16,7 +16,7 @@ def gs_rand(lower, upper, batch_shape):
 
 
 class Go2Env:
-    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
+    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False, camera_res=None):
         self.num_envs: int = num_envs
         self.num_actions = env_cfg["num_actions"]
         self.cfg = env_cfg
@@ -75,6 +75,11 @@ class Go2Env:
                 quat=self.env_cfg["base_init_quat"],
             ),
         )
+
+        # 動画用のカメラ（env 0 を写す）。カメラは build の前に置く必要がある。
+        self.camera = None
+        if camera_res is not None:
+            self.camera = self.scene.add_camera(res=camera_res, pos=(-2.0, -2.0, 1.5), lookat=(0.0, 0.0, 0.3), fov=50)
 
         self.scene.build(n_envs=num_envs)
 
