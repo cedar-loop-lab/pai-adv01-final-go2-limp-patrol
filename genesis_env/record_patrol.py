@@ -1,6 +1,7 @@
 """動画用: 1台の Go2 が巡回中に1脚のトルク上限が下がり、帰還するまでを録画する。
 
 劣化はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
+劣化した脚は、3D の赤い目印（股・膝・足先）と、左下の脚の配置図で示す。
 1回の試行を録るだけで、評価の結果ではない。出力は video/（Git 管理外）。
 """
 
@@ -13,6 +14,7 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 
 import genesis as gs
+from genesis.utils.geom import transform_by_quat
 
 from configs import REFERENCE_TORQUE_NM
 from eval_common import LEG_NAMES, REPO_ROOT, is_fallen, load_env_and_policy, reset_with_noise
@@ -23,10 +25,52 @@ FRAME_EVERY = 2  # 50 Hz の制御から 25 fps で録る
 FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 CAMERA_OFFSET = np.array([-1.6, -1.6, 1.0])
 AFTER_DONE_S = 1.5
+CALF_LENGTH_M = 0.213  # Go2 の膝から足先まで（URDF の foot_joint の位置）
+MARKER_COLOR = (1.0, 0.1, 0.1, 0.85)
+# 脚の上に立てる下向きの矢印（胴体に隠れても見えるように）
+ARROW_HEIGHT_M = 0.45
+ARROW_LENGTH_M = 0.25
+# 脚の配置図（上から見た図、前が上）での各脚の位置 [px]。FR は右前。
+LEG_MAP_XY = {"FL": (-1, -1), "FR": (1, -1), "RL": (-1, 1), "RR": (1, 1)}
 
 
-def draw_overlay(frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]], font) -> np.ndarray:
+def leg_points(env, link_idx: list[int]) -> np.ndarray:
+    """劣化した脚の股（thigh の原点）・膝（calf の原点）・足先の位置。足先は calf に固定されているので計算する。"""
+    pos = env.robot.get_links_pos(link_idx)[0]
+    quat = env.robot.get_links_quat(link_idx)[0]
+    foot = pos[1] + transform_by_quat(torch.tensor([0.0, 0.0, -CALF_LENGTH_M], device=gs.device), quat[1])
+    return torch.stack([pos[0], pos[1], foot]).cpu().numpy()
+
+
+def draw_leg_marker(scene, points: np.ndarray) -> None:
+    scene.clear_debug_objects()
+    for point in points:
+        scene.draw_debug_sphere(point, radius=0.055, color=MARKER_COLOR)
+    for start, end in zip(points[:-1], points[1:]):
+        scene.draw_debug_line(start, end, radius=0.022, color=MARKER_COLOR)
+    arrow_start = points[0] + np.array([0.0, 0.0, ARROW_HEIGHT_M])
+    scene.draw_debug_arrow(arrow_start, vec=(0.0, 0.0, -ARROW_LENGTH_M), radius=0.02, color=MARKER_COLOR)
+
+
+def draw_leg_map(image: Image.Image, faulty_leg: str | None, font) -> None:
+    """左下に、上から見た脚の配置図を描く。劣化した脚を赤で塗る。"""
+    draw = ImageDraw.Draw(image)
+    cx, cy, dx, dy, r = 70, image.height - 80, 26, 40, 13
+    draw.rectangle((cx - 18, cy - 46, cx + 18, cy + 46), fill=(70, 70, 80), outline=(230, 230, 230), width=2)
+    draw.text((cx - 10, cy - 80), "前", fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+    for name, (sx, sy) in LEG_MAP_XY.items():
+        x, y = cx + sx * dx, cy + sy * dy
+        color = (255, 40, 40) if name == faulty_leg else (150, 220, 150)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=color, outline=(0, 0, 0), width=2)
+    legend = "赤 = トルク上限が下がった脚" if faulty_leg else "全脚 正常"
+    draw.text((cx + 50, cy - 10), legend, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+
+
+def draw_overlay(
+    frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]], faulty_leg: str | None, font
+) -> np.ndarray:
     image = Image.fromarray(frame)
+    draw_leg_map(image, faulty_leg, font)
     draw = ImageDraw.Draw(image)
     y = 8
     for text, color in lines:
@@ -53,6 +97,7 @@ def main() -> None:
     font = ImageFont.truetype(FONT_PATH, 20)
 
     leg = LEG_NAMES.index(args.leg)
+    leg_link_idx = [env.robot.get_link(f"{args.leg}_{part}").idx_local for part in ("thigh", "calf")]
     ref = torch.tensor(REFERENCE_TORQUE_NM, device=gs.device)
     limit = env.nominal_torque_limit.clone()
     cols = slice(leg * 3, leg * 3 + 3)
@@ -82,6 +127,8 @@ def main() -> None:
 
             if i_step % FRAME_EVERY == 0:
                 base = env.base_pos[0].cpu().numpy()
+                if not math.isnan(onset_t):
+                    draw_leg_marker(env.scene, leg_points(env, leg_link_idx))
                 env.camera.set_pose(pos=base + CAMERA_OFFSET, lookat=base)
                 rgb = env.camera.render()[0]
                 lines = [(args.label, (255, 255, 255)), (f"t = {t:5.1f} s", (255, 255, 255))]
@@ -93,7 +140,8 @@ def main() -> None:
                     lines.append((f"転倒（{fallen_t:.1f} s）", (255, 90, 90)))
                 elif not math.isnan(done_t):
                     lines.append((f"帰還完了（劣化から {done_t - onset_t:.1f} s）", (120, 200, 255)))
-                frames.append(draw_overlay(rgb, lines, font))
+                faulty_leg = None if math.isnan(onset_t) else args.leg
+                frames.append(draw_overlay(rgb, lines, faulty_leg, font))
 
             is_over = not math.isnan(fallen_t) and t > fallen_t + AFTER_DONE_S
             is_over |= not math.isnan(done_t) and t > done_t + AFTER_DONE_S

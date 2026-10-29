@@ -77,9 +77,12 @@ class Go2Env:
         )
 
         # 動画用のカメラ（env 0 を写す）。カメラは build の前に置く必要がある。
+        # debug=True にすると、劣化した脚の目印（draw_debug_*）も写る。
         self.camera = None
         if camera_res is not None:
-            self.camera = self.scene.add_camera(res=camera_res, pos=(-2.0, -2.0, 1.5), lookat=(0.0, 0.0, 0.3), fov=50)
+            self.camera = self.scene.add_camera(
+                res=camera_res, pos=(-2.0, -2.0, 1.5), lookat=(0.0, 0.0, 0.3), fov=50, debug=True
+            )
 
         self.scene.build(n_envs=num_envs)
 
