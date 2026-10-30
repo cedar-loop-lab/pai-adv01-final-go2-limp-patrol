@@ -5,6 +5,7 @@
 通知の条件:
   none   : 通知しない。1周を終えれば自然に帰還する
   oracle : 劣化を入れた時点で帰還を通知する（正解通知。固定した帰還ルールの参照条件で、最適な行動の上限ではない）
+  detector: 巡回中に検知器（detector.py。設定は val で決めて固定した DETECTOR_CFG）が劣化を判定した時点で帰還を通知する
 成功 = 劣化（起点）から DEADLINE_S 秒以内に帰還完了（半径 r 以内かつ低速を連続 hold_s 秒）し、それまで転倒しないこと。
 自然に1周を終えて帰還した場合も成功に数える。分母は試行表の全試行（通知前の転倒・未通知・誤報も含める）。
 失敗は、転倒（局面つき）・停止保持の失敗（基地に着いたが完了せず）・巡回中・帰還途中・起点前の帰還（誤報）に分ける。
@@ -19,6 +20,7 @@ import torch
 
 import genesis as gs
 
+from detector import DETECTOR_CFG, DetectorConfig, LegFaultDetector, leg_error
 from eval_common import (
     LEG_NAMES, REPO_ROOT, degraded_limit, is_fallen, load_env_and_policy, motion_label, reset_from_table,
 )
@@ -31,9 +33,14 @@ EXP_NAMES = {"proposed": "go2-degr-h10-s{}", "nominal": "go2-nominal-h10-s{}"}
 CKPT = 999
 
 
-def simulate(env, policy, trials: list[dict], notify: str) -> dict:
+def simulate(env, policy, trials: list[dict], notify: str, detector_cfg: DetectorConfig | None = None,
+             trace: dict | None = None) -> dict:
+    """trace に dict を渡すと、ステップごとの脚の追従誤差と巡回中かどうかを記録する（検知器の設定を決める用）。"""
     n = len(trials)
     mission = PatrolMission(MissionConfig(), n, env.dt)
+    detector = LegFaultDetector(detector_cfg, n, env.dt, gs.device) if notify == "detector" else None
+    if trace is not None:
+        trace.update(leg_err=[], is_active=[])
     cfg = mission.cfg
     limit = torch.stack([degraded_limit(env, t["s"], LEG_NAMES.index(t["leg"]) if t["leg"] else 0) for t in trials])
     onset_m = torch.tensor([t["onset_m"] for t in trials], device=gs.device)
@@ -71,7 +78,16 @@ def simulate(env, policy, trials: list[dict], notify: str) -> dict:
             cmd = mission.step(pos_xy, yaw, env.base_lin_vel[:, :2].norm(dim=1))
             env.commands.copy_(cmd)
             done_t = torch.where(is_alive & mission.is_done & ~was_done, t, done_t)
+            is_patrol = is_alive & (mission.mode == PATROL)
             obs, _, _, _ = env.step(policy(obs))
+            err = leg_error(env.target_dof_pos, env.dof_pos)
+            if trace is not None:
+                trace["leg_err"].append(err.half())
+                trace["is_active"].append(is_patrol)
+            if detector is not None:
+                is_notify = detector.update(err, is_patrol, t)
+                mission.request_return(is_notify)
+                notify_t = torch.where(is_notify, t, notify_t)
 
             is_new_fall = is_alive & done_t.isnan() & is_fallen(env)
             fall_t = torch.where(is_new_fall, t, fall_t)
@@ -82,7 +98,8 @@ def simulate(env, policy, trials: list[dict], notify: str) -> dict:
                 break
     return {"onset_t": onset_t, "notify_t": notify_t, "arrive_t": arrive_t, "done_t": done_t, "fall_t": fall_t,
             "fall_mode": fall_mode, "fall_cmd": fall_cmd, "mode_at_deadline": mode_at_deadline,
-            "num_rearm": mission.num_rearm}
+            "num_rearm": mission.num_rearm,
+            "detected_leg": detector.leg if detector is not None else torch.full((n,), -1, device=gs.device)}
 
 
 def classify(rec: dict, i: int) -> str:
@@ -116,9 +133,13 @@ def per_trial_records(rec: dict, trials: list[dict]) -> list[dict]:
 
         outcome = classify(rec, i)
         notified = not math.isnan(rec["notify_t"][i].item())
+        notify_before_onset = notified and (math.isnan(onset) or rec["notify_t"][i].item() < onset)
+        detected_leg = int(rec["detected_leg"][i])
         records.append({
             "id": trial["id"], "s": trial["s"], "leg": trial["leg"], "outcome": outcome,
             "notified": notified, "natural_return": outcome == "success" and not notified,
+            "false_alarm": notified and (trial["s"] is None or notify_before_onset),
+            "detected_leg": LEG_NAMES[detected_leg] if detected_leg >= 0 else None,
             "notify_after_onset_s": since_onset("notify_t"), "arrive_after_onset_s": since_onset("arrive_t"),
             "done_after_onset_s": since_onset("done_t"), "fall_after_onset_s": since_onset("fall_t"),
             "fall_motion": motion_label(rec["fall_cmd"][i]) if outcome.startswith("fell") else None,
@@ -141,6 +162,9 @@ def summarize(records: list[dict]) -> list[dict]:
             "success_rate": outcomes["success"] / len(rs),
             "fall_rate": sum(v for k, v in outcomes.items() if k.startswith("fell")) / len(rs),
             "natural_return": sum(r["natural_return"] for r in rs),
+            "false_alarm": sum(r["false_alarm"] for r in rs),
+            "notified": sum(r["notified"] for r in rs),
+            "leg_correct": sum(r["detected_leg"] == r["leg"] for r in rs if r["notified"] and r["leg"]),
             "outcomes": dict(outcomes),
             "fall_motions": dict(Counter(f"{r['outcome']}/{r['fall_motion']}" for r in rs if r["fall_motion"])),
         })
@@ -149,17 +173,19 @@ def summarize(records: list[dict]) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--notify", choices=["none", "oracle"], required=True)
+    parser.add_argument("--notify", choices=["none", "oracle", "detector"], required=True)
     parser.add_argument("--policy", choices=EXP_NAMES.keys(), default="proposed")
     parser.add_argument("--train-seed", type=int, required=True)
     parser.add_argument("--table", type=str, required=True)
     args = parser.parse_args()
+    if args.notify == "detector" and DETECTOR_CFG is None:
+        parser.error("DETECTOR_CFG is not fixed yet (run select_detector.py on val first)")
 
     table = json.loads((REPO_ROOT / "genesis_env" / "trial_tables" / f"{args.table}.json").read_text())
     trials = table["trials"]
     exp = EXP_NAMES[args.policy].format(args.train_seed)
     env, policy, _ = load_env_and_policy(exp, CKPT, len(trials), MAX_TIME_S, seed=table["seed"])
-    rec = simulate(env, policy, trials, args.notify)
+    rec = simulate(env, policy, trials, args.notify, DETECTOR_CFG)
     records = per_trial_records(rec, trials)
     rows = summarize(records)
 
@@ -169,12 +195,14 @@ def main() -> None:
     out = out_dir / f"{tag}-s{args.train_seed}.json"
     meta = {"policy": args.policy, "notify": args.notify, "exp": exp, "ckpt": CKPT, "train_seed": args.train_seed,
             "table": args.table, "table_seed": table["seed"], "deadline_s": DEADLINE_S,
-            "mission": MissionConfig().__dict__}
+            "mission": MissionConfig().__dict__,
+            "detector": DETECTOR_CFG.__dict__ if args.notify == "detector" else None}
     out.write_text(json.dumps({**meta, "summary": rows, "trials": records}, indent=1))
     for row in rows:
         if row["leg"] in (None, "all"):
             print(f"{tag} s{args.train_seed} s={row['s']}: success {row['success_rate']:.3f} fall {row['fall_rate']:.3f} "
-                  f"natural {row['natural_return']} {row['outcomes']}")
+                  f"natural {row['natural_return']} notified {row['notified']} false alarm {row['false_alarm']} "
+                  f"leg ok {row['leg_correct']} {row['outcomes']}")
     print(f"-> {out.relative_to(REPO_ROOT)}")
 
 

@@ -1,6 +1,7 @@
 # Derived from Genesis v1.4.5 examples/locomotion/go2_env.py (Apache-2.0, Copyright Genesis-Embodied-AI).
 # Changes: per-env joint torque limits (degradation model), zero-command sampling for stand-still,
-# observation history, random torque-limit degradation during training, optional recording camera.
+# observation history, random torque-limit degradation during training, optional recording camera,
+# exposing the joint position targets sent to the PD controller (target_dof_pos, for the fault detector).
 import math
 
 import torch
@@ -159,6 +160,7 @@ class Go2Env:
         self.last_actions = torch.zeros_like(self.actions)
         self.dof_pos = torch.empty_like(self.actions)
         self.dof_vel = torch.empty_like(self.actions)
+        self.target_dof_pos = torch.zeros_like(self.actions)
         self.last_dof_vel = torch.zeros_like(self.actions)
         self.base_pos = torch.empty((self.num_envs, 3), dtype=gs.tc_float, device=gs.device)
         self.base_quat = torch.empty((self.num_envs, 4), dtype=gs.tc_float, device=gs.device)
@@ -242,8 +244,8 @@ class Go2Env:
             self._apply_scheduled_degradation()
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
-        target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
-        self.robot.control_dofs_position(target_dof_pos[:, self.actions_dof_idx], slice(6, 18))
+        self.target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
+        self.robot.control_dofs_position(self.target_dof_pos[:, self.actions_dof_idx], slice(6, 18))
         self.scene.step()
 
         # update buffers
