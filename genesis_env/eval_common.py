@@ -81,3 +81,12 @@ def degraded_limit(env: Go2Env, s: float | None, leg: int) -> torch.Tensor:
         cols = slice(leg * 3, leg * 3 + 3)
         limit[cols] = torch.minimum(s * ref[cols], env.nominal_torque_limit[cols])
     return limit
+
+
+def reset_from_table(env: Go2Env, trials: list[dict]):
+    """全 env をリセットし、試行表の関節角度の乱れを入れる（最初の制御ステップの前に1回）。"""
+    obs = env.reset()
+    noise = torch.tensor([t["joint_noise_rad"] for t in trials], device=gs.device)
+    env.robot.set_dofs_position(env.default_dof_pos + noise, env.motors_dof_idx)
+    env.commands.zero_()
+    return obs

@@ -18,7 +18,9 @@ import torch
 
 import genesis as gs
 
-from eval_common import LEG_NAMES, REPO_ROOT, degraded_limit, is_fallen, load_env_and_policy, motion_label
+from eval_common import (
+    LEG_NAMES, REPO_ROOT, degraded_limit, is_fallen, load_env_and_policy, motion_label, reset_from_table,
+)
 from patrol import PATROL, MissionConfig, PatrolMission, looped_waypoints
 
 OBSERVE_S = 40.0
@@ -27,14 +29,6 @@ LAP_SEGMENTS = 4  # 1周の区間数（基地 → 3点 → 基地）
 MAX_TIME_S = 80.0  # 起点は最大 12 m（約 26 s）なので、起点 + 40 s に余裕を持たせた打ち切り
 EXP_NAMES = {"nominal": "go2-nominal-h10-s{}", "nominal_slow": "go2-nominal-h10-s{}", "proposed": "go2-degr-h10-s{}"}
 CKPT = 999
-
-
-def reset_from_table(env, trials: list[dict]):
-    obs = env.reset()
-    noise = torch.tensor([t["joint_noise_rad"] for t in trials], device=gs.device)
-    env.robot.set_dofs_position(env.default_dof_pos + noise, env.motors_dof_idx)
-    env.commands.zero_()
-    return obs
 
 
 def simulate(env, policy, trials: list[dict], slow_factor: float | None) -> dict:

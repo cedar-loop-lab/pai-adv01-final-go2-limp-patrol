@@ -4,7 +4,7 @@
 発生地点は1周 16 m のコースの 25〜75%（4〜12 m）から一様に選ぶ。関節角度の乱れは既定の姿勢に
 U[-0.1, 0.1] rad を関節ごとに足し、リセット直後（最初の制御ステップの前）に1回だけ入れる。
 初期の位置と向きは固定（基地、+x 向き）。
-val は開発・検証用（減速率と検知の閾値を決める）、final は最終テスト用で、乱数を分ける。
+val は開発・検証用（減速率と検知の閾値を決める）、final は評価A の最終テスト用、final_b は評価B の最終テスト用で、乱数を分ける。
 """
 
 import argparse
@@ -17,6 +17,8 @@ from eval_common import LEG_NAMES, REPO_ROOT
 TABLES = {
     "val": {"seed": 1001, "severities": [0.6, 0.45], "per_leg": 50, "normal": 50},
     "final": {"seed": 2001, "severities": [0.5, 0.4, 0.3, 0.25], "per_leg": 100, "normal": 100},
+    # 評価B の最終用。評価A の最終結果を見たあとで検知器を作るので、A とは別の未使用の表にする（強さと分布は同じ）
+    "final_b": {"seed": 3001, "severities": [0.5, 0.4, 0.3, 0.25], "per_leg": 100, "normal": 100},
 }
 ONSET_RANGE_M = (4.0, 12.0)
 JOINT_NOISE_RAD = 0.1
