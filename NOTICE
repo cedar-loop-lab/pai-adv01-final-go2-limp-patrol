@@ -1,0 +1,7 @@
+pai2026-adv01-final
+Copyright 2026 cedar-loop-lab
+
+This repository includes a file derived from Genesis (https://github.com/Genesis-Embodied-AI/Genesis),
+licensed under the Apache License, Version 2.0:
+  genesis_env/envs/go2_env.py  (from examples/locomotion/go2_env.py in Genesis v1.4.5; modified,
+                                the changes are listed at the top of the file)

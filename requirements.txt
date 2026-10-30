@@ -1,4 +1,5 @@
-# Genesis 側（Python 3.12 の venv）の依存。ROS2 側は apt / rosdep で管理する。
+# Genesis 側（Python 3.12 の venv）の依存。ROS2 側（ROS 2 Lyrical、Python 3.14）は apt で入れ、
+# ノード用に .venv-ros（--system-site-packages、CPU 版 torch）を作る（README の「セットアップ」）。
 # Genesis は Python <3.14 が必須のため、ROS2（rclpy, Python 3.14）とは別プロセスで動かす。
 #
 # セットアップ:
