@@ -22,6 +22,8 @@ class MissionConfig:
     # 基地は原点。コースは基地 → 各ウェイポイント → 基地。1辺 4 m の正方形を仮置き。
     waypoints: tuple[tuple[float, float], ...] = ((4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
     v_cruise: float = 0.5
+    # 帰還中の前進速度。None なら v_cruise と同じ
+    v_return: float | None = None
     yaw_gain: float = 2.0
     yaw_max: float = 1.0
     # 向きのずれがこれより大きいと前進せずに旋回する
@@ -89,7 +91,8 @@ class PatrolMission:
         heading_err = torch.atan2(delta[:, 1], delta[:, 0]) - yaw
         heading_err = torch.atan2(heading_err.sin(), heading_err.cos())
         yaw_rate = (cfg.yaw_gain * heading_err).clamp(-cfg.yaw_max, cfg.yaw_max)
-        vx = torch.full_like(dist, cfg.v_cruise)
+        v_return = cfg.v_cruise if cfg.v_return is None else cfg.v_return
+        vx = torch.where(self.mode == RETURN, v_return, cfg.v_cruise).to(dist.dtype)
         vx = torch.where(heading_err.abs() > math.radians(cfg.turn_in_place_deg), 0.0, vx)
         vx = torch.where(self.mode == RETURN, vx.minimum(dist * cfg.approach_gain), vx)
 
