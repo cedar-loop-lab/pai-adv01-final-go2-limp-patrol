@@ -35,7 +35,7 @@ def load_env_and_policy(
     env_cfg["termination_if_pitch_greater_than"] = 180
     env_cfg["episode_length_s"] = duration_s + 1.0
     env_cfg["resampling_time_s"] = 1e6
-    # 劣化は評価スクリプトが set_torque_limit で決めた条件だけを入れる（学習時のランダムな劣化は止める）
+    # 不調は評価スクリプトが set_torque_limit で決めた条件だけを入れる（学習時のランダムな不調は止める）
     env_cfg["degradation"] = None
 
     torch.manual_seed(seed)

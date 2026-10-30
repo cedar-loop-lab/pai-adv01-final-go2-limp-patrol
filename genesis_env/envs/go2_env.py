@@ -47,7 +47,7 @@ class Go2Env:
                 # can save memory. Violating this condition will raise an exception.
                 max_collision_pairs=20,
                 tolerance=1e-5,
-                # 劣化は env ごとにトルク上限を変えるので、dof の情報を env ごとに持たせる
+                # 不調は env ごとにトルク上限を変えるので、dof の情報を env ごとに持たせる
                 batch_dofs_info=True,
             ),
             vis_options=gs.options.VisOptions(
@@ -78,7 +78,7 @@ class Go2Env:
         )
 
         # 動画用のカメラ（env 0 を写す）。カメラは build の前に置く必要がある。
-        # debug=True にすると、劣化した脚の目印（draw_debug_*）も写る。
+        # debug=True にすると、不調の脚の目印（draw_debug_*）も写る。
         self.camera = None
         if camera_res is not None:
             self.camera = self.scene.add_camera(
@@ -106,14 +106,14 @@ class Go2Env:
         self.torque_limit = self.nominal_torque_limit.repeat(self.num_envs, 1)
         self.has_degradation = False
 
-        # 学習時の劣化（env_cfg["degradation"] が None なら入れない。評価では外から set_torque_limit で入れる）
+        # 学習時の不調（env_cfg["degradation"] が None なら入れない。評価では外から set_torque_limit で入れる）
         self.degradation_cfg = self.env_cfg.get("degradation")
         if self.degradation_cfg is not None:
             self.reference_torque = torch.tensor(
                 self.degradation_cfg["reference_torque"], dtype=gs.tc_float, device=gs.device
             )
             self.fault_limit = self.nominal_torque_limit.repeat(self.num_envs, 1)
-            # 劣化が起きるステップ（episode_length_buf と比べる）。劣化しないエピソードは -1。
+            # 不調が起きるステップ（episode_length_buf と比べる）。不調にならないエピソードは -1。
             self.fault_onset_step = torch.full((self.num_envs,), -1, dtype=gs.tc_int, device=gs.device)
 
         # 観測の履歴（古い順）。方策には (history_len × 1ステップ分) を平らにつないで渡す。
@@ -191,7 +191,7 @@ class Go2Env:
         self.has_degradation = True
 
     def _restore_torque_limit(self, envs_idx):
-        # リセットした env の劣化を必ず解除する（次のエピソードに持ち越さない）
+        # リセットした env の不調を必ず解除する（次のエピソードに持ち越さない）
         if not self.has_degradation:
             return
         if envs_idx is None:
@@ -202,7 +202,7 @@ class Go2Env:
         self.has_degradation = bool((self.torque_limit < self.nominal_torque_limit).any())
 
     def _sample_degradation(self, envs_idx):
-        # エピソードごとに、劣化するか・どの脚か・強さ s・発生ステップを選び直す
+        # エピソードごとに、不調になるか・どの脚か・強さ s・発生ステップを選び直す
         cfg = self.degradation_cfg
         n = self.num_envs
         has_fault = torch.rand(n, device=gs.device) < cfg["prob"]

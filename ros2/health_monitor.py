@@ -1,4 +1,4 @@
-"""health_monitor ノード: 脚ごとの追従誤差から劣化を検知し、/health/fault に出す。
+"""health_monitor ノード: 脚ごとの追従誤差から不調を検知し、/health/fault に出す。
 
 検知器は評価B と同じ detector.py・同じ設定と較正値（detector_calib.json）。判定は巡回中（/mission/mode が patrol）だけ。
 時刻は /odom の header.stamp（シミュレーションの時刻）を使う。/sim/ground_truth は購読しない。

@@ -1,12 +1,12 @@
-"""評価A（歩行）: 巡回中に1脚が劣化しても、帰還させずに巡回を続けたとき、転ばずにどれだけ進めるか。
+"""評価A（歩行）: 巡回中に1脚が不調になっても、帰還させずに巡回を続けたとき、転ばずにどれだけ進めるか。
 
 試行表（make_trial_table.py）の各試行を、全方式で同じ条件で走らせる。
 - コースは1周 16 m の正方形を3周つなげたもの（観測時間の間に帰還区間へ入らない長さ）。基本速度 0.5 m/s。
-- 劣化はコースに沿った距離が試行表の onset_m に達した時点で入れる（正常条件も同じ時点を起点にする）。
-- 方式: nominal（通常版）/ nominal_slow（通常版。劣化と同時に前進・旋回の指令を --slow-factor 倍にする。
-  劣化の時点は正解として与える。正常条件では減速しない）/ proposed（提案版。速度は変えない）。
-- 観測時間: 劣化（起点）から OBSERVE_S 秒。転倒した時点で打ち切る。
-指標: 転倒率、劣化後に進めた距離（コースに沿った距離）、転倒した局面。正常条件では1周目の所要時間と速度追従も。
+- 不調はコースに沿った距離が試行表の onset_m に達した時点で入れる（正常条件も同じ時点を起点にする）。
+- 方式: nominal（通常版）/ nominal_slow（通常版。不調と同時に前進・旋回の指令を --slow-factor 倍にする。
+  不調の時点は正解として与える。正常条件では減速しない）/ proposed（提案版。速度は変えない）。
+- 観測時間: 不調（起点）から OBSERVE_S 秒。転倒した時点で打ち切る。
+指標: 転倒率、不調が起きた後に進めた距離（コースに沿った距離）、転倒した局面。正常条件では1周目の所要時間と速度追従も。
 """
 
 import argparse
@@ -36,7 +36,7 @@ def simulate(env, policy, trials: list[dict], slow_factor: float | None) -> dict
     mission = PatrolMission(MissionConfig(waypoints=looped_waypoints(LAPS)), n, env.dt)
     limit = torch.stack([degraded_limit(env, t["s"], LEG_NAMES.index(t["leg"]) if t["leg"] else 0) for t in trials])
     onset_m = torch.tensor([t["onset_m"] for t in trials], device=gs.device)
-    # 減速は劣化を入れた試行だけ（正常条件には故障の通知が無いので減速しない）
+    # 減速は不調を入れた試行だけ（正常条件には故障の通知が無いので減速しない）
     has_fault = torch.tensor([t["s"] is not None for t in trials], device=gs.device)
 
     def full(value: float) -> torch.Tensor:

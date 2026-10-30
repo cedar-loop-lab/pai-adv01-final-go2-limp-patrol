@@ -1,9 +1,9 @@
 """動画用: 1台の Go2 が巡回中に1脚のトルク上限が下がり、帰還するまでを録画する。
 
-劣化はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
+不調はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
 --continue-patrol なら帰還を指示せず巡回を続ける。巡回と帰還の速度は --v-cruise / --v-return で変えられる。
 --trial-id を指定すると、試行表の同じ試行（脚・強さ・起点・関節角度の乱れ）を録る。--slow-factor は「通常＋減速」用。
-劣化した脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
+不調の脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
 1回の試行を録るだけで、評価の結果ではない。出力は video/（Git 管理外）。
 """
 
@@ -36,7 +36,7 @@ ARROW_LENGTH_M = 0.25
 
 
 def leg_points(env, link_idx: list[int]) -> np.ndarray:
-    """劣化した脚の股（thigh の原点）・膝（calf の原点）・足先の位置。足先は calf に固定されているので計算する。"""
+    """不調の脚の股（thigh の原点）・膝（calf の原点）・足先の位置。足先は calf に固定されているので計算する。"""
     pos = env.robot.get_links_pos(link_idx)[0]
     quat = env.robot.get_links_quat(link_idx)[0]
     foot = pos[1] + transform_by_quat(torch.tensor([0.0, 0.0, -CALF_LENGTH_M], device=gs.device), quat[1])
@@ -91,23 +91,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--v-return", type=float, default=None, help="Default: same as --v-cruise")
     parser.add_argument("--slow-factor", type=float, default=None, help="Scale commands after onset (nominal + slow)")
     parser.add_argument("--continue-patrol", action="store_true", help="Do not request return at onset")
-    parser.add_argument("--term", type=str, default="劣化", help="Word shown for the fault on the overlay (e.g. 不調)")
     return parser.parse_args()
 
 
 def status_lines(args, leg: str, t: float, vx_cmd: float, onset_t: float, fallen_t: float, done_t: float) -> list:
     lines = [(args.label, (255, 255, 255)), (f"t = {t:5.1f} s   速度指令 {vx_cmd:.2f} m/s", (255, 255, 255))]
     if math.isnan(onset_t):
-        lines.append((f"巡回中（{args.term}なし）", (180, 255, 180)))
+        lines.append(("巡回中（不調なし）", (180, 255, 180)))
     else:
         after = "巡回を続ける" if args.continue_patrol else "帰還を指示"
         if args.slow_factor is not None:
             after += f"（指令を {args.slow_factor:g} 倍に減速）"
         lines.append((f"{onset_t:.1f} s: {LEG_LABELS[leg]}のトルク上限を下げた → {after}", (255, 200, 80)))
     if not math.isnan(fallen_t):
-        lines.append((f"転倒（{args.term}から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
+        lines.append((f"転倒（不調から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
     elif not math.isnan(done_t):
-        lines.append((f"帰還完了（{args.term}から {done_t - onset_t:.1f} s）", (120, 200, 255)))
+        lines.append((f"帰還完了（不調から {done_t - onset_t:.1f} s）", (120, 200, 255)))
     return lines
 
 

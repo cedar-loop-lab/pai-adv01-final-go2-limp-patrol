@@ -1,4 +1,4 @@
-"""学習用の環境の確認: 観測の履歴と、エピソード中にランダムに入る劣化が仕様どおりか。
+"""学習用の環境の確認: 観測の履歴と、エピソード中にランダムに入る不調が仕様どおりか。
 
 仕様（8章）: 確率 0.5 でランダムな1脚の3関節の上限を min(s × 共通基準, 元の上限) に下げる。
 s ~ U[0.35, 1.0]、発生はエピソード中の一様な時刻。リセットで元の上限に戻る。
@@ -59,7 +59,7 @@ def main() -> None:
         f"min {onset.min().item():.0f}, max {onset.max().item():.0f} of {env.max_episode_length}",
     )
 
-    # 発生ステップの前は元の上限、発生後は劣化した上限になること
+    # 発生ステップの前は元の上限、発生後は不調になった上限になること
     env.episode_length_buf.zero_()
     before = env.torque_limit.clone()
     actions = torch.zeros(NUM_ENVS, env.num_actions, device=gs.device)

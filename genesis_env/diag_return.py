@@ -1,8 +1,8 @@
-"""開発用の診断: 巡回中に1脚が劣化し、追従器で基地へ帰還するまでを、どこで失敗したか分かる形で記録する。
+"""開発用の診断: 巡回中に1脚が不調になり、追従器で基地へ帰還するまでを、どこで失敗したか分かる形で記録する。
 
 各試行は巡回 0.5 m/s で始め、進み具合が試行ごとの値（--onset-range から一様に抽選）に達した時点で
-劣化と帰還の指示を同時に入れる（検知器は使わない「正解通知」。劣化なしの条件も同じ時点で指示する）。
-期限は劣化（指示）から T 秒で、再接近してもリセットしない。成功判定は MissionConfig のとおり。
+不調と帰還の指示を同時に入れる（検知器は使わない「正解通知」。不調なしの条件も同じ時点で指示する）。
+期限は不調（指示）から T 秒で、再接近してもリセットしない。成功判定は MissionConfig のとおり。
 記録: 基地（半径 r）への初回到達時刻、保持から帰還へ戻った回数、転倒した局面、最終結果（完了・転倒・時間切れ）。
 この結果は追従器の調整と原因の切り分けに使う開発用の結果で、最終結果には使わない。
 """
@@ -20,7 +20,7 @@ from eval_common import LEG_NAMES, degraded_limit, is_fallen, load_env_and_polic
 from patrol import HOLD, PATROL, RETURN, MissionConfig, PatrolMission
 
 DEADLINE_S = 40.0
-MAX_TIME_S = 100.0  # 劣化前の巡回（最大でコースの 75%、約 25 s）＋ 期限に余裕を持たせた打ち切り
+MAX_TIME_S = 100.0  # 不調が起きる前の巡回（最大でコースの 75%、約 25 s）＋ 期限に余裕を持たせた打ち切り
 MODE_NAMES = {PATROL: "patrol", RETURN: "return", HOLD: "hold"}
 
 
@@ -123,7 +123,7 @@ def main() -> None:
 
     severities = [None if s == "none" else float(s) for s in args.severities]
     legs = [LEG_NAMES.index(leg) for leg in args.legs]
-    # 劣化なしは脚によらないので1条件だけにする
+    # 不調なしは脚によらないので1条件だけにする
     conditions = [(s, leg) for s in severities for leg in (legs if s is not None else legs[:1])]
     rec = simulate(args.exp_name, conditions, args.trials, tuple(args.onset_range), args.seed)
     results = summarize(rec, conditions, args.trials)
