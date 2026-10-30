@@ -2,11 +2,13 @@
 
 劣化はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
 --continue-patrol なら帰還を指示せず巡回を続ける。巡回と帰還の速度は --v-cruise / --v-return で変えられる。
+--trial-id を指定すると、試行表の同じ試行（脚・強さ・起点・関節角度の乱れ）を録る。--slow-factor は「通常＋減速」用。
 劣化した脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
 1回の試行を録るだけで、評価の結果ではない。出力は video/（Git 管理外）。
 """
 
 import argparse
+import json
 import math
 
 import imageio.v2 as imageio
@@ -17,9 +19,8 @@ from PIL import Image, ImageDraw, ImageFont
 import genesis as gs
 from genesis.utils.geom import transform_by_quat
 
-from configs import REFERENCE_TORQUE_NM
-from eval_common import LEG_NAMES, REPO_ROOT, is_fallen, load_env_and_policy, reset_with_noise
-from patrol import MissionConfig, PatrolMission
+from eval_common import LEG_NAMES, REPO_ROOT, degraded_limit, is_fallen, load_env_and_policy, reset_with_noise
+from patrol import MissionConfig, PatrolMission, looped_waypoints
 
 RES = (640, 480)
 LEG_LABELS = {"FR": "右前脚", "FL": "左前脚", "RR": "右後脚", "RL": "左後脚"}
@@ -62,7 +63,16 @@ def draw_overlay(frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]
     return np.asarray(image)
 
 
-def main() -> None:
+def load_trial(args) -> tuple[str, float, float | None, list[float] | None]:
+    """脚・強さ・起点（コースに沿った距離。None なら --onset-progress）・関節角度の乱れ。--trial-id があれば試行表から取る。"""
+    if args.trial_id is None:
+        return args.leg, args.s, None, None
+    table = json.loads((REPO_ROOT / "genesis_env" / "trial_tables" / f"{args.table}.json").read_text())
+    trial = table["trials"][args.trial_id]
+    return trial["leg"], trial["s"], trial["onset_m"], trial["joint_noise_rad"]
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp-name", type=str, required=True)
     parser.add_argument("--ckpt", type=int, required=True)
@@ -70,37 +80,70 @@ def main() -> None:
     parser.add_argument("--leg", type=str, default="FR", choices=LEG_NAMES)
     parser.add_argument("--s", type=float, default=0.45)
     parser.add_argument("--onset-progress", type=float, default=0.4)
+    parser.add_argument("--table", type=str, default="val", help="Trial table used with --trial-id")
+    parser.add_argument("--trial-id", type=int, default=None, help="Take leg, s, onset and joint noise from the table")
     parser.add_argument("--max-time", type=float, default=60.0)
+    parser.add_argument("--observe-s", type=float, default=None, help="Stop this long after onset")
     parser.add_argument("--seed", type=int, default=500)
     parser.add_argument("--out", type=str, required=True)
+    parser.add_argument("--laps", type=int, default=1)
     parser.add_argument("--v-cruise", type=float, default=MissionConfig.v_cruise)
     parser.add_argument("--v-return", type=float, default=None, help="Default: same as --v-cruise")
+    parser.add_argument("--slow-factor", type=float, default=None, help="Scale commands after onset (nominal + slow)")
     parser.add_argument("--continue-patrol", action="store_true", help="Do not request return at onset")
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def status_lines(args, leg: str, t: float, vx_cmd: float, onset_t: float, fallen_t: float, done_t: float) -> list:
+    lines = [(args.label, (255, 255, 255)), (f"t = {t:5.1f} s   速度指令 {vx_cmd:.2f} m/s", (255, 255, 255))]
+    if math.isnan(onset_t):
+        lines.append(("巡回中（劣化なし）", (180, 255, 180)))
+    else:
+        after = "巡回を続ける" if args.continue_patrol else "帰還を指示"
+        if args.slow_factor is not None:
+            after += f"（指令を {args.slow_factor:g} 倍に減速）"
+        lines.append((f"{onset_t:.1f} s: {LEG_LABELS[leg]}のトルク上限を下げた → {after}", (255, 200, 80)))
+    if not math.isnan(fallen_t):
+        lines.append((f"転倒（劣化から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
+    elif not math.isnan(done_t):
+        lines.append((f"帰還完了（劣化から {done_t - onset_t:.1f} s）", (120, 200, 255)))
+    return lines
+
+
+def main() -> None:
+    args = parse_args()
+    leg, s, onset_m, joint_noise = load_trial(args)
     env, policy, _ = load_env_and_policy(args.exp_name, args.ckpt, 1, args.max_time, args.seed, camera_res=RES)
-    mission = PatrolMission(MissionConfig(v_cruise=args.v_cruise, v_return=args.v_return), 1, env.dt)
+    cfg = MissionConfig(waypoints=looped_waypoints(args.laps), v_cruise=args.v_cruise, v_return=args.v_return)
+    mission = PatrolMission(cfg, 1, env.dt)
     font = ImageFont.truetype(FONT_PATH, 20)
+    leg_link_idx = [env.robot.get_link(f"{leg}_{part}").idx_local for part in ("thigh", "calf")]
+    limit = degraded_limit(env, s, LEG_NAMES.index(leg))
 
-    leg = LEG_NAMES.index(args.leg)
-    leg_link_idx = [env.robot.get_link(f"{args.leg}_{part}").idx_local for part in ("thigh", "calf")]
-    ref = torch.tensor(REFERENCE_TORQUE_NM, device=gs.device)
-    limit = env.nominal_torque_limit.clone()
-    cols = slice(leg * 3, leg * 3 + 3)
-    limit[cols] = torch.minimum(args.s * ref[cols], env.nominal_torque_limit[cols])
-
-    obs = reset_with_noise(env, torch.zeros(1, 3, device=gs.device))
+    if joint_noise is None:
+        obs = reset_with_noise(env, torch.zeros(1, 3, device=gs.device))
+    else:
+        obs = env.reset()
+        noise = torch.tensor([joint_noise], device=gs.device)
+        env.robot.set_dofs_position(env.default_dof_pos + noise, env.motors_dof_idx)
+        env.commands.zero_()
+    is_all = torch.ones(1, dtype=torch.bool, device=gs.device)
     onset_t, done_t, fallen_t = math.nan, math.nan, math.nan
     frames = []
-    num_steps = int(args.max_time / env.dt)
     with torch.no_grad():
-        for i_step in range(num_steps):
+        for i_step in range(int(args.max_time / env.dt)):
             t = i_step * env.dt
             pos_xy = env.base_pos[:, :2]
-            if math.isnan(onset_t) and mission.progress(pos_xy)[0].item() >= args.onset_progress:
+            if onset_m is None:
+                is_onset = mission.progress(pos_xy)[0].item() >= args.onset_progress
+            else:
+                is_onset = mission.distance_along(pos_xy)[0].item() >= onset_m
+            if math.isnan(onset_t) and is_onset:
                 env.set_torque_limit(limit[None])
+                if args.slow_factor is not None:
+                    mission.set_speed_scale(is_all, args.slow_factor)
                 if not args.continue_patrol:
-                    mission.request_return(torch.ones(1, dtype=torch.bool, device=gs.device))
+                    mission.request_return(is_all)
                 onset_t = t
             yaw = torch.deg2rad(env.base_euler[:, 2])
             speed = env.base_lin_vel[:, :2].norm(dim=1)
@@ -118,21 +161,12 @@ def main() -> None:
                     draw_leg_marker(env.scene, leg_points(env, leg_link_idx))
                 env.camera.set_pose(pos=base + CAMERA_OFFSET, lookat=base)
                 rgb = env.camera.render()[0]
-                vx_cmd = env.commands[0, 0].item()
-                lines = [(args.label, (255, 255, 255)), (f"t = {t:5.1f} s   速度指令 {vx_cmd:.1f} m/s", (255, 255, 255))]
-                if math.isnan(onset_t):
-                    lines.append(("巡回中（劣化なし）", (180, 255, 180)))
-                else:
-                    after = "巡回を続ける" if args.continue_patrol else "帰還を指示"
-                    lines.append((f"{onset_t:.1f} s: {LEG_LABELS[args.leg]}のトルク上限を下げた → {after}", (255, 200, 80)))
-                if not math.isnan(fallen_t):
-                    lines.append((f"転倒（{fallen_t:.1f} s）", (255, 90, 90)))
-                elif not math.isnan(done_t):
-                    lines.append((f"帰還完了（劣化から {done_t - onset_t:.1f} s）", (120, 200, 255)))
+                lines = status_lines(args, leg, t, env.commands[0, 0].item(), onset_t, fallen_t, done_t)
                 frames.append(draw_overlay(rgb, lines, font))
 
             is_over = not math.isnan(fallen_t) and t > fallen_t + AFTER_DONE_S
             is_over |= not math.isnan(done_t) and t > done_t + AFTER_DONE_S
+            is_over |= args.observe_s is not None and not math.isnan(onset_t) and t > onset_t + args.observe_s
             if is_over:
                 break
 
