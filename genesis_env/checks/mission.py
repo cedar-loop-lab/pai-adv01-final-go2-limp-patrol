@@ -4,6 +4,7 @@
 どちらかを外れたら数え直す。保持中に半径の外へ出たら帰還に戻る（完了後は戻らない）。
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import torch
 import genesis as gs
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from patrol import HOLD, PATROL, RETURN, MissionConfig, PatrolMission  # noqa: E402
+from patrol import HOLD, PATROL, RETURN, MissionConfig, PatrolMission, looped_waypoints  # noqa: E402
 
 DT = 0.02
 HOLD_STEPS = round(MissionConfig().hold_s / DT)
@@ -79,6 +80,20 @@ def main() -> None:
     check("done after re-approach", bool(mission.is_done[0]))
     run(mission, (0.6, 0.0), 0.0, 1)
     check("no rearm after done", int(mission.num_rearm[0]) == 1 and int(mission.mode[0]) == HOLD)
+
+    looped = PatrolMission(MissionConfig(waypoints=looped_waypoints(3)), 1, DT)
+    check("3 laps = 48 m", abs(looped.course_length - 48.0) < 1e-4, f"{looped.course_length:.1f} m")
+
+    mission = PatrolMission(MissionConfig(), 2, DT)
+    mission.set_speed_scale(torch.tensor([False, True], device=gs.device), 0.6)
+    # 1台目は正面、2台目は真横にウェイポイント（その場旋回で旋回指令が上限に張り付く）
+    cmd = mission.step(torch.zeros(2, 2, device=gs.device), torch.tensor([0.0, -math.pi / 2], device=gs.device),
+                       torch.zeros(2, device=gs.device))
+    unscaled = PatrolMission(MissionConfig(), 2, DT).step(
+        torch.zeros(2, 2, device=gs.device), torch.tensor([0.0, -math.pi / 2], device=gs.device),
+        torch.zeros(2, device=gs.device))
+    check("speed scale leaves other envs", torch.allclose(cmd[0], unscaled[0]), f"{cmd[0].tolist()}")
+    check("speed scale scales vx and yaw rate", torch.allclose(cmd[1], unscaled[1] * 0.6), f"{cmd[1].tolist()}")
 
     print(f"{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)

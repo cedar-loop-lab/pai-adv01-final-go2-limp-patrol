@@ -16,35 +16,16 @@ import torch
 
 import genesis as gs
 
-from configs import REFERENCE_TORQUE_NM
-from eval_common import LEG_NAMES, is_fallen, load_env_and_policy, reset_with_noise
+from eval_common import LEG_NAMES, degraded_limit, is_fallen, load_env_and_policy, motion_label, reset_with_noise
 from patrol import HOLD, PATROL, RETURN, MissionConfig, PatrolMission
 
 DEADLINE_S = 40.0
 MAX_TIME_S = 100.0  # 劣化前の巡回（最大でコースの 75%、約 25 s）＋ 期限に余裕を持たせた打ち切り
 MODE_NAMES = {PATROL: "patrol", RETURN: "return", HOLD: "hold"}
-TURN_CMD_MIN = 0.05  # これより小さい旋回指令は直進とみなす [rad/s]
-
-
-def motion_label(cmd: torch.Tensor) -> str:
-    """転倒した瞬間の指令を、直進・停止・旋回（左右、その場か前進しながらか）に分類する。"""
-    vx, yaw_rate = cmd[0].item(), cmd[2].item()
-    if abs(yaw_rate) < TURN_CMD_MIN:
-        return "straight" if vx > 0 else "stop"
-    side = "L" if yaw_rate > 0 else "R"
-    return f"spin_{side}" if vx == 0 else f"arc_{side}"
 
 
 def degraded_limits(env, conditions: list[tuple[float | None, int]], trials: int) -> torch.Tensor:
-    ref = torch.tensor(REFERENCE_TORQUE_NM, device=gs.device)
-    limits = []
-    for s, leg in conditions:
-        limit = env.nominal_torque_limit.clone()
-        if s is not None:
-            cols = slice(leg * 3, leg * 3 + 3)
-            limit[cols] = torch.minimum(s * ref[cols], env.nominal_torque_limit[cols])
-        limits.append(limit)
-    return torch.stack(limits).repeat_interleave(trials, 0)
+    return torch.stack([degraded_limit(env, s, leg) for s, leg in conditions]).repeat_interleave(trials, 0)
 
 
 def simulate(exp: str, conditions: list, trials: int, onset_range: tuple[float, float], seed: int) -> dict:

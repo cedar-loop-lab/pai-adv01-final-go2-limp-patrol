@@ -8,6 +8,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
+from configs import REFERENCE_TORQUE_NM
 from envs.go2_env import Go2Env
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +17,7 @@ LEG_NAMES = ["FR", "FL", "RR", "RL"]
 FALL_TILT_DEG = 45.0
 FALL_BASE_Z = 0.15
 INIT_JOINT_NOISE_RAD = 0.1
+TURN_CMD_MIN = 0.05  # これより小さい旋回指令は直進とみなす [rad/s]
 
 
 def load_env_and_policy(
@@ -60,3 +62,22 @@ def reset_with_noise(env: Go2Env, commands: torch.Tensor):
 def is_fallen(env: Go2Env) -> torch.Tensor:
     tilt = env.base_euler[:, :2].abs().max(dim=1).values
     return (tilt > FALL_TILT_DEG) | (env.base_pos[:, 2] < FALL_BASE_Z)
+
+
+def motion_label(cmd: torch.Tensor) -> str:
+    """転倒した瞬間の指令を、直進・停止・旋回（左右、その場か前進しながらか）に分類する。"""
+    vx, yaw_rate = cmd[0].item(), cmd[2].item()
+    if abs(yaw_rate) < TURN_CMD_MIN:
+        return "straight" if vx > 0 else "stop"
+    side = "L" if yaw_rate > 0 else "R"
+    return f"spin_{side}" if vx == 0 else f"arc_{side}"
+
+
+def degraded_limit(env: Go2Env, s: float | None, leg: int) -> torch.Tensor:
+    """1脚（3関節）の上限を min(s × 共通基準, 元の上限) にした上限ベクトル。s が None なら元の上限。"""
+    limit = env.nominal_torque_limit.clone()
+    if s is not None:
+        ref = torch.tensor(REFERENCE_TORQUE_NM, device=gs.device)
+        cols = slice(leg * 3, leg * 3 + 3)
+        limit[cols] = torch.minimum(s * ref[cols], env.nominal_torque_limit[cols])
+    return limit

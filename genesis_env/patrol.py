@@ -5,6 +5,7 @@
   RETURN: 基地へまっすぐ戻る（コースを1周し終えたとき、または帰還を指示されたとき）
   HOLD:   基地の近く（hold_enter_radius 以内）に入ったので停止指令を出し続ける。
           完了前に成功判定の半径 r の外へ出たら RETURN に戻って再接近する（num_rearm に数える）
+減速（set_speed_scale）は、前進速度と旋回速度の指令を env ごとに同じ倍率で下げる（評価A の「通常＋減速」用）。
 帰還完了は「帰還を始めたあと、半径 r 以内かつ速度が閾値以下の状態を連続で hold_s 秒保った」こと。
 どちらかを外れたら数え直す。モードの切り替え（再接近）では数え直す以外のリセットはしない。
 """
@@ -17,12 +18,18 @@ import torch
 import genesis as gs
 
 PATROL, RETURN, HOLD = 0, 1, 2
+SQUARE_LAP = ((4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
+
+
+def looped_waypoints(laps: int, lap: tuple[tuple[float, float], ...] = SQUARE_LAP) -> tuple[tuple[float, float], ...]:
+    """コースを laps 周つなげたウェイポイント（周の切れ目で基地を通過点として通る）。最後の周の後に帰還する。"""
+    return (lap + ((0.0, 0.0),)) * (laps - 1) + lap
 
 
 @dataclass(frozen=True)
 class MissionConfig:
     # 基地は原点。コースは基地 → 各ウェイポイント → 基地。1辺 4 m の正方形を仮置き。
-    waypoints: tuple[tuple[float, float], ...] = ((4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
+    waypoints: tuple[tuple[float, float], ...] = SQUARE_LAP
     v_cruise: float = 0.5
     # 帰還中の前進速度。None なら v_cruise と同じ
     v_return: float | None = None
@@ -59,6 +66,10 @@ class PatrolMission:
         self.hold_steps = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
         self.is_done = torch.zeros(num_envs, dtype=torch.bool, device=gs.device)
         self.num_rearm = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
+        self.speed_scale = torch.ones(num_envs, dtype=gs.tc_float, device=gs.device)
+
+    def set_speed_scale(self, envs_mask: torch.Tensor, scale: float) -> None:
+        self.speed_scale = torch.where(envs_mask, scale, self.speed_scale)
 
     def progress(self, pos_xy: torch.Tensor) -> torch.Tensor:
         """コースの進み具合（0〜1）。PATROL 中は現在の区間への射影で、それ以外は 1。"""
@@ -67,6 +78,10 @@ class PatrolMission:
         along = ((pos_xy - start) * (end - start)).sum(dim=1) / seg_len
         dist = self.cum_len[self.i_seg] + along.clamp(min=0.0).minimum(seg_len)
         return torch.where(self.mode == PATROL, dist / self.course_length, 1.0)
+
+    def distance_along(self, pos_xy: torch.Tensor) -> torch.Tensor:
+        """PATROL 中にコースに沿って進んだ距離 [m]（基地から）。"""
+        return self.progress(pos_xy) * self.course_length
 
     def request_return(self, envs_mask: torch.Tensor) -> None:
         self.mode = torch.where(envs_mask & (self.mode == PATROL), RETURN, self.mode)
@@ -108,4 +123,4 @@ class PatrolMission:
         is_hold = self.mode == HOLD
         vx = torch.where(is_hold, 0.0, vx)
         yaw_rate = torch.where(is_hold, 0.0, yaw_rate)
-        return torch.stack([vx, torch.zeros_like(vx), yaw_rate], dim=1)
+        return torch.stack([vx * self.speed_scale, torch.zeros_like(vx), yaw_rate * self.speed_scale], dim=1)
