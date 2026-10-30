@@ -117,3 +117,9 @@ ros2/run_batch.sh && .venv/bin/python ros2/summarize_runs.py   # 結合試験 20
 
 - `genesis_env/envs/go2_env.py` は [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) v1.4.5 の `examples/locomotion/go2_env.py`（Apache-2.0）を改変したもの。変更点はファイル冒頭に記載。
 - それ以外のコードは本リポジトリの作成物。ライセンスは [LICENSE](LICENSE)（Apache-2.0）。
+
+## 生成AIの利用
+
+実装、実験の実行、文書の下書きに AI コーディングアシスタント（Claude Code）を使った。
+テーマと方針の決定、評価条件（成功の定義・閾値・比較する方式）の決定、別の AI によるレビューを踏まえた修正の判断、結果と動画の確認は自分で行った。
+数値はすべて実行ログから集計したもの。
