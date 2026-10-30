@@ -54,6 +54,7 @@ Physical AI 応用編1（2026 Summer）最終課題「AI×ロボティクスに�
 | `genesis_env/select_detector.py` | 検知器の設定を検証用の表だけで決める |
 | `genesis_env/sim_server.py`, `sim_link.py` | ROS2 結合用のシミュレーション（実時間 50 Hz、UDP） |
 | `ros2/` | ROS2 ノード（`genesis_bridge`, `health_monitor`, `mission_node`）と結合試験のスクリプト |
+| `policies/`, `genesis_env/export_policies.py` | 評価した学習済みの方策 6 つ（推論用に actor だけを書き出したもの）と、その書き出し |
 | `genesis_env/checks/` | シミュレーションを使わない確認（追従器・検知器）と、環境の確認 |
 | `genesis_env/diag_*.py`, `eval_patrol.py` など | 開発中の診断（最終結果には使っていない） |
 
@@ -107,7 +108,10 @@ ros2/run_trial.sh go2-degr-h10-s1 val 300 demo        # 結果は logs/ros2/demo
 ros2/run_batch.sh && .venv/bin/python ros2/summarize_runs.py   # 結合試験 20 回
 ```
 
-学習済みの重みは容量が大きいためリポジトリに含めていない。
+学習済みの重み: 評価した 6 つの方策（通常版・提案版 × seed 1〜3）を `policies/<exp>/` に同梱している（`model_999.pt` と設定 `cfgs.pkl`）。
+推論に使う actor だけを `genesis_env/export_policies.py` で書き出したもの（学習を続けるための optimizer・critic の状態は外した）。
+評価スクリプトは `policies/` があればそれを読むので、学習せずに評価A・B と ROS2 の結合を再現できる。
+書き出した重みで評価A（final）・評価B（final_b）を全条件で回し直し、上の結果と同じになることを確認した。
 
 ## ライセンスと出典
 

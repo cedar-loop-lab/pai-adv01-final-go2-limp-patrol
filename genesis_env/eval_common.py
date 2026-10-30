@@ -12,6 +12,8 @@ from configs import REFERENCE_TORQUE_NM
 from envs.go2_env import Go2Env
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# 公開した重み（export_policies.py で actor だけを書き出したもの）。ここに無ければ学習の出力 logs/ を使う
+POLICY_ROOT = REPO_ROOT / "policies"
 LEG_NAMES = ["FR", "FL", "RR", "RL"]
 # 転倒の判定（学習時のリセット条件 10° より緩い、実際に倒れた状態）
 FALL_TILT_DEG = 45.0
@@ -25,7 +27,8 @@ def load_env_and_policy(
 ):
     """評価用の環境と推論用の方策を返す。自動リセットと指令の再抽選は止める（転倒は is_fallen で判定）。"""
     log_dir = REPO_ROOT / "logs" / exp_name
-    with open(log_dir / "cfgs.pkl", "rb") as f:
+    src_dir = POLICY_ROOT / exp_name if (POLICY_ROOT / exp_name / f"model_{ckpt}.pt").exists() else log_dir
+    with open(src_dir / "cfgs.pkl", "rb") as f:
         env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
     reward_cfg["reward_scales"] = {}
     env_cfg["termination_if_roll_greater_than"] = 180
@@ -46,7 +49,8 @@ def load_env_and_policy(
         camera_res=camera_res,
     )
     runner = OnPolicyRunner(env, train_cfg, str(log_dir), device=gs.device)
-    runner.load(str(log_dir / f"model_{ckpt}.pt"))
+    # 推論には actor だけを使う（公開した重みには optimizer・critic の状態が無い）
+    runner.load(str(src_dir / f"model_{ckpt}.pt"), load_cfg={"actor": True})
     return env, runner.get_inference_policy(device=gs.device), log_dir
 
 

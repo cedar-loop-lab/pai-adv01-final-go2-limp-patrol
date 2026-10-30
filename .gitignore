@@ -21,6 +21,7 @@ secrets/
 *.avi
 *.mov
 *.pt
+!policies/*/model_999.pt
 *.pth
 *.ckpt
 *.onnx
