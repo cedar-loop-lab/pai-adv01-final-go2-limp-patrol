@@ -44,6 +44,7 @@ def simulate(env, policy, trials: list[dict], notify: str, detector_calib: tuple
     cfg = mission.cfg
     limit = torch.stack([degraded_limit(env, t["s"], LEG_NAMES.index(t["leg"]) if t["leg"] else 0) for t in trials])
     onset_m = torch.tensor([t["onset_m"] for t in trials], device=gs.device)
+    has_fault = torch.tensor([t["s"] is not None for t in trials], device=gs.device)
 
     def full(value: float) -> torch.Tensor:
         return torch.full((n,), value, device=gs.device)
@@ -62,7 +63,7 @@ def simulate(env, policy, trials: list[dict], notify: str, detector_calib: tuple
                 env.set_torque_limit(limit, is_new)
                 onset_t = torch.where(is_new, t, onset_t)
                 if notify == "oracle":
-                    is_notify = is_new & (mission.mode == PATROL)
+                    is_notify = is_new & has_fault & (mission.mode == PATROL)  # 正常条件には故障が無いので通知しない
                     mission.request_return(is_notify)
                     notify_t = torch.where(is_notify, t, notify_t)
             is_alive = fall_t.isnan()
