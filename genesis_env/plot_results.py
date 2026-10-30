@@ -68,6 +68,7 @@ def save(fig, out: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", type=str, required=True)
+    parser.add_argument("--term", type=str, default="劣化", help="Word used for the fault in labels (e.g. 不調 for the video)")
     args = parser.parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -76,15 +77,16 @@ def main() -> None:
 
     fall = pooled(REPO_ROOT / "logs" / "eval_a" / "final", "*.json", lambda t: t["outcome"] == "fell")
     fig, ax = plt.subplots(figsize=(7.2, 3.6))
-    grouped_bars(ax, fall, {"nominal": "通常版", "nominal_slow0.4": "通常版 + 劣化時に減速（× 0.4）",
-                            "proposed": "提案版（劣化を入れて学習）"}, "転倒率（劣化から 40 s）")
+    term = args.term
+    grouped_bars(ax, fall, {"nominal": "通常版", "nominal_slow0.4": f"通常版 + {term}時に減速（× 0.4）",
+                            "proposed": f"提案版（{term}を入れて学習）"}, f"転倒率（{term}から 40 s）")
     ax.set_title("評価A: 帰還させずに巡回を続けたときの転倒率（3 シード × 4 脚 × 100 試行）", color=TEXT, fontsize=11, pad=24)
     save(fig, out_dir / "eval_a_fall.png")
 
     success = pooled(REPO_ROOT / "logs" / "eval_b" / "final_b", "proposed-*.json", lambda t: t["outcome"] == "success")
     fig, ax = plt.subplots(figsize=(7.2, 3.6))
     grouped_bars(ax, success, {"proposed-none": "検知なし（1 周して自然に帰還）", "proposed-detector": "検知器で帰還",
-                               "proposed-oracle": "正解通知で即帰還"}, "帰還成功率（劣化から 40 s 以内）")
+                               "proposed-oracle": "正解通知で即帰還"}, f"帰還成功率（{term}から 40 s 以内）")
     ax.set_title("評価B: 提案版の帰還成功率（3 シード × 4 脚 × 100 試行）", color=TEXT, fontsize=11, pad=24)
     save(fig, out_dir / "eval_b_success.png")
 

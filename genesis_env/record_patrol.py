@@ -91,22 +91,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--v-return", type=float, default=None, help="Default: same as --v-cruise")
     parser.add_argument("--slow-factor", type=float, default=None, help="Scale commands after onset (nominal + slow)")
     parser.add_argument("--continue-patrol", action="store_true", help="Do not request return at onset")
+    parser.add_argument("--term", type=str, default="劣化", help="Word shown for the fault on the overlay (e.g. 不調)")
     return parser.parse_args()
 
 
 def status_lines(args, leg: str, t: float, vx_cmd: float, onset_t: float, fallen_t: float, done_t: float) -> list:
     lines = [(args.label, (255, 255, 255)), (f"t = {t:5.1f} s   速度指令 {vx_cmd:.2f} m/s", (255, 255, 255))]
     if math.isnan(onset_t):
-        lines.append(("巡回中（劣化なし）", (180, 255, 180)))
+        lines.append((f"巡回中（{args.term}なし）", (180, 255, 180)))
     else:
         after = "巡回を続ける" if args.continue_patrol else "帰還を指示"
         if args.slow_factor is not None:
             after += f"（指令を {args.slow_factor:g} 倍に減速）"
         lines.append((f"{onset_t:.1f} s: {LEG_LABELS[leg]}のトルク上限を下げた → {after}", (255, 200, 80)))
     if not math.isnan(fallen_t):
-        lines.append((f"転倒（劣化から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
+        lines.append((f"転倒（{args.term}から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
     elif not math.isnan(done_t):
-        lines.append((f"帰還完了（劣化から {done_t - onset_t:.1f} s）", (120, 200, 255)))
+        lines.append((f"帰還完了（{args.term}から {done_t - onset_t:.1f} s）", (120, 200, 255)))
     return lines
 
 
