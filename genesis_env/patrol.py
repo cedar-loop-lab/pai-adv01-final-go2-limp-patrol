@@ -15,8 +15,6 @@ from dataclasses import dataclass
 
 import torch
 
-import genesis as gs
-
 PATROL, RETURN, HOLD = 0, 1, 2
 SQUARE_LAP = ((4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
 
@@ -48,25 +46,29 @@ class MissionConfig:
 
 
 class PatrolMission:
-    def __init__(self, cfg: MissionConfig, num_envs: int, dt: float):
+    def __init__(self, cfg: MissionConfig, num_envs: int, dt: float, device=None):
+        if device is None:  # 評価スクリプトでは Genesis の device を使う（ROS2 のノードは CPU を渡し、Genesis を読まない）
+            import genesis as gs
+
+            device = gs.device
         self.cfg = cfg
         self.dt = dt
-        self.waypoints = torch.tensor(cfg.waypoints, dtype=gs.tc_float, device=gs.device)
-        self.home = torch.zeros(2, dtype=gs.tc_float, device=gs.device)
+        self.waypoints = torch.tensor(cfg.waypoints, dtype=torch.float32, device=device)
+        self.home = torch.zeros(2, dtype=torch.float32, device=device)
         # コースの区間（基地から始まり基地で終わる）と、各区間の始点までの累積距離
         points = torch.cat([self.home[None], self.waypoints, self.home[None]])
         self.seg_start, self.seg_end = points[:-1], points[1:]
         seg_len = (self.seg_end - self.seg_start).norm(dim=1)
         self.seg_len = seg_len
-        self.cum_len = torch.cat([torch.zeros(1, device=gs.device), seg_len.cumsum(0)])
+        self.cum_len = torch.cat([torch.zeros(1, device=device), seg_len.cumsum(0)])
         self.course_length = self.cum_len[-1].item()
 
-        self.mode = torch.full((num_envs,), PATROL, dtype=torch.int64, device=gs.device)
-        self.i_seg = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
-        self.hold_steps = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
-        self.is_done = torch.zeros(num_envs, dtype=torch.bool, device=gs.device)
-        self.num_rearm = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
-        self.speed_scale = torch.ones(num_envs, dtype=gs.tc_float, device=gs.device)
+        self.mode = torch.full((num_envs,), PATROL, dtype=torch.int64, device=device)
+        self.i_seg = torch.zeros(num_envs, dtype=torch.int64, device=device)
+        self.hold_steps = torch.zeros(num_envs, dtype=torch.int64, device=device)
+        self.is_done = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        self.num_rearm = torch.zeros(num_envs, dtype=torch.int64, device=device)
+        self.speed_scale = torch.ones(num_envs, dtype=torch.float32, device=device)
 
     def set_speed_scale(self, envs_mask: torch.Tensor, scale: float) -> None:
         self.speed_scale = torch.where(envs_mask, scale, self.speed_scale)

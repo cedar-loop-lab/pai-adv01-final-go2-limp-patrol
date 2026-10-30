@@ -36,6 +36,7 @@ checkpoints/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-ros/
 venv/
 env/
 *.egg-info/
