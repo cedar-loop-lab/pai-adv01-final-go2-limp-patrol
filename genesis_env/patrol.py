@@ -3,8 +3,10 @@
 全 env をまとめて扱う（torch のテンソル演算）。モードは env ごとに
   PATROL: コースのウェイポイントを順にたどる
   RETURN: 基地へまっすぐ戻る（コースを1周し終えたとき、または帰還を指示されたとき）
-  HOLD:   基地の半径 r 以内に入ったので停止指令を出し続ける
-帰還完了は「HOLD のまま、半径 r 以内かつ速度が閾値以下の状態を hold_s 秒保った」こと。
+  HOLD:   基地の近く（hold_enter_radius 以内）に入ったので停止指令を出し続ける。
+          完了前に成功判定の半径 r の外へ出たら RETURN に戻って再接近する（num_rearm に数える）
+帰還完了は「帰還を始めたあと、半径 r 以内かつ速度が閾値以下の状態を連続で hold_s 秒保った」こと。
+どちらかを外れたら数え直す。モードの切り替え（再接近）では数え直す以外のリセットはしない。
 """
 
 import math
@@ -30,6 +32,8 @@ class MissionConfig:
     turn_in_place_deg: float = 45.0
     reach_radius: float = 0.3
     home_radius: float = 0.5
+    # 停止指令に切り替える半径。成功判定の半径 home_radius より内側にして、止まったあとの小さなずれで外に出にくくする
+    hold_enter_radius: float = 0.3
     # 基地に近づいたら減速する（距離 [m] × この値 [1/s] を速度の上限にする）
     approach_gain: float = 1.0
     hold_speed: float = 0.1
@@ -54,6 +58,7 @@ class PatrolMission:
         self.i_seg = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
         self.hold_steps = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
         self.is_done = torch.zeros(num_envs, dtype=torch.bool, device=gs.device)
+        self.num_rearm = torch.zeros(num_envs, dtype=torch.int64, device=gs.device)
 
     def progress(self, pos_xy: torch.Tensor) -> torch.Tensor:
         """コースの進み具合（0〜1）。PATROL 中は現在の区間への射影で、それ以外は 1。"""
@@ -81,10 +86,14 @@ class PatrolMission:
         is_reached = (self.mode == PATROL) & (dist < cfg.reach_radius)
         self.i_seg = torch.where(is_reached, self.i_seg + 1, self.i_seg)
 
-        # 基地の半径内に入ったら停止して保持
+        # 基地の近くに入ったら停止して保持。完了前に成功判定の半径の外へ出たら、帰還に戻って再接近する
         is_home = dist < cfg.home_radius
-        self.mode = torch.where((self.mode == RETURN) & is_home, HOLD, self.mode)
-        is_still = (self.mode == HOLD) & is_home & (speed < cfg.hold_speed)
+        is_left = (self.mode == HOLD) & ~is_home & ~self.is_done
+        self.num_rearm += is_left.long()
+        self.mode = torch.where(is_left, RETURN, self.mode)
+        self.mode = torch.where((self.mode == RETURN) & (dist < cfg.hold_enter_radius), HOLD, self.mode)
+        # 成功判定はモードによらず、帰還を始めたあとの「半径内かつ低速」を連続で数える
+        is_still = (self.mode != PATROL) & is_home & (speed < cfg.hold_speed)
         self.hold_steps = torch.where(is_still, self.hold_steps + 1, 0)
         self.is_done |= self.hold_steps >= round(cfg.hold_s / self.dt)
 
