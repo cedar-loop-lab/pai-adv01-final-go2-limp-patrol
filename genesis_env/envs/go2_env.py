@@ -78,7 +78,7 @@ class Go2Env:
         )
 
         # 動画用のカメラ（env 0 を写す）。カメラは build の前に置く必要がある。
-        # debug=True にすると、不調の脚の目印（draw_debug_*）も写る。
+        # debug=True にすると、不調のある脚の目印（draw_debug_*）も写る。
         self.camera = None
         if camera_res is not None:
             self.camera = self.scene.add_camera(
@@ -202,7 +202,7 @@ class Go2Env:
         self.has_degradation = bool((self.torque_limit < self.nominal_torque_limit).any())
 
     def _sample_degradation(self, envs_idx):
-        # エピソードごとに、不調になるか・どの脚か・強さ s・発生ステップを選び直す
+        # エピソードごとに、不調になるか・どの脚か・倍率 s・発生ステップを選び直す
         cfg = self.degradation_cfg
         n = self.num_envs
         has_fault = torch.rand(n, device=gs.device) < cfg["prob"]

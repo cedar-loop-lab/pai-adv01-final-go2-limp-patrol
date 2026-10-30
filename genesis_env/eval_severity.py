@@ -1,6 +1,6 @@
 """予備実験: 片脚のトルク上限を下げたとき、方策がどこから崩れるかを調べる（不調条件を決めるため）。
 
-不調の強さ s は「上限 / 共通基準トルク」。共通基準は基準方策の正常時の関節別 p95 トルク
+トルク上限の倍率 s は「上限 / 共通基準トルク」。共通基準は基準方策の正常時の関節別 p95 トルク
 （eval_envelope.py の結果）で、全方式に同じ Nm をかけるために固定する。
 不調は片脚の 3 関節すべてに、歩き始めてから ONSET_S 秒後にかける。
 この結果は最終テスト条件を決めるための予備実験で、最終結果には使わない。
@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--seed", type=int, default=200)
-    # 開発中の比較は検証用の強さ（0.6, 0.45）だけで行う。最終テストの強さはここで使わない。
+    # 開発中の比較は検証用の倍率 s（0.6, 0.45）だけで行う。最終テストの倍率 s はここで使わない。
     parser.add_argument("--severities", type=float, nargs="+", default=SEVERITIES)
     parser.add_argument("--tag", type=str, default="", help="Suffix for the output file name")
     args = parser.parse_args()

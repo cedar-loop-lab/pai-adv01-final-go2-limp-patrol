@@ -1,7 +1,7 @@
 """確認①: 正常時（不調なし）の運転範囲を調べる。
 
 前進速度 × 旋回速度の格子ごとに、初期姿勢を少しずつ変えた試行を並列で走らせ、
-転倒率・速度追従誤差・関節トルク（不調の強さの共通基準に使う）を集計する。
+転倒率・速度追従誤差・関節トルク（トルク上限の倍率 s の共通基準に使う）を集計する。
 結果は logs/<exp>/envelope.json に保存する。
 """
 
@@ -65,7 +65,7 @@ def main() -> None:
         result["cells"].append({"vx": vx, "yaw": yaw, "fall_rate": fall_rate, "vx_err": vx_err, "yaw_err": yaw_err})
         print(f"{vx:5.2f} {yaw:5.2f} | {fall_rate:5.2f} | {vx_err:8.3f} {yaw_err:9.3f}")
 
-    # 関節ごとの必要トルク（転倒しなかった試行、立ち上がり後）。不調の強さの共通基準に使う。
+    # 関節ごとの必要トルク（転倒しなかった試行、立ち上がり後）。トルク上限の倍率 s の共通基準に使う。
     t = torques[settle_steps:, ~has_fallen].reshape(-1, 12)
     sample = t[torch.randperm(t.shape[0], device=gs.device)[:TORQUE_QUANTILE_SAMPLES]]
     p95 = torch.quantile(sample, 0.95, dim=0)

@@ -20,7 +20,7 @@ COMMAND_VARIANTS = {
 }
 
 
-# 不調の強さ s の共通基準 [Nm]（joint_names の順）。go2-patrol-s1 の正常時の関節別 p95 トルク
+# トルク上限の倍率 s の共通基準 [Nm]（joint_names の順）。go2-patrol-s1 の正常時の関節別 p95 トルク
 # （logs/go2-patrol-s1/envelope.json、2026-10-30）を固定値として写したもの。全方式・全シードで同じ値を使う。
 REFERENCE_TORQUE_NM = (
     8.775196075439453, 13.417834281921387, 15.17480754852295,  # FR hip / thigh / calf

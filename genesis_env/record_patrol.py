@@ -2,8 +2,8 @@
 
 不調はコースの進み具合 --onset-progress で入れ、同時に帰還を指示する（検知器はまだ無いので「正解通知」）。
 --continue-patrol なら帰還を指示せず巡回を続ける。巡回と帰還の速度は --v-cruise / --v-return で変えられる。
---trial-id を指定すると、試行表の同じ試行（脚・強さ・起点・関節角度の乱れ）を録る。--slow-factor は「通常＋減速」用。
-不調の脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
+--trial-id を指定すると、試行表の同じ試行（脚・倍率 s・起点・関節角度の乱れ）を録る。--slow-factor は「通常＋減速」用。
+不調のある脚は、3D の赤い目印（股・膝・足先と、脚の上の矢印）で示す。
 1回の試行を録るだけで、評価の結果ではない。出力は video/（Git 管理外）。
 """
 
@@ -36,7 +36,7 @@ ARROW_LENGTH_M = 0.25
 
 
 def leg_points(env, link_idx: list[int]) -> np.ndarray:
-    """不調の脚の股（thigh の原点）・膝（calf の原点）・足先の位置。足先は calf に固定されているので計算する。"""
+    """不調のある脚の股（thigh の原点）・膝（calf の原点）・足先の位置。足先は calf に固定されているので計算する。"""
     pos = env.robot.get_links_pos(link_idx)[0]
     quat = env.robot.get_links_quat(link_idx)[0]
     foot = pos[1] + transform_by_quat(torch.tensor([0.0, 0.0, -CALF_LENGTH_M], device=gs.device), quat[1])
@@ -64,7 +64,7 @@ def draw_overlay(frame: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]
 
 
 def load_trial(args) -> tuple[str, float, float | None, list[float] | None]:
-    """脚・強さ・起点（コースに沿った距離。None なら --onset-progress）・関節角度の乱れ。--trial-id があれば試行表から取る。"""
+    """脚・倍率 s・起点（コースに沿った距離。None なら --onset-progress）・関節角度の乱れ。--trial-id があれば試行表から取る。"""
     if args.trial_id is None:
         return args.leg, args.s, None, None
     table = json.loads((REPO_ROOT / "genesis_env" / "trial_tables" / f"{args.table}.json").read_text())
@@ -104,9 +104,9 @@ def status_lines(args, leg: str, t: float, vx_cmd: float, onset_t: float, fallen
             after += f"（指令を {args.slow_factor:g} 倍に減速）"
         lines.append((f"{onset_t:.1f} s: {LEG_LABELS[leg]}のトルク上限を下げた → {after}", (255, 200, 80)))
     if not math.isnan(fallen_t):
-        lines.append((f"転倒（不調から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
+        lines.append((f"転倒（不調発生から {fallen_t - onset_t:.1f} s）", (255, 90, 90)))
     elif not math.isnan(done_t):
-        lines.append((f"帰還完了（不調から {done_t - onset_t:.1f} s）", (120, 200, 255)))
+        lines.append((f"帰還完了（不調発生から {done_t - onset_t:.1f} s）", (120, 200, 255)))
     return lines
 
 

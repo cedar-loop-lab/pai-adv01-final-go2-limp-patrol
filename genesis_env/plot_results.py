@@ -1,4 +1,4 @@
-"""レポート用の図: 評価A（転倒率）と評価B（帰還成功率）を、不調の強さごとに方式で並べた棒グラフ。
+"""レポート用の図: 評価A（転倒率）と評価B（帰還成功率）を、トルク上限の倍率 s ごとに方式で並べた棒グラフ。
 
 入力は logs/eval_a/final と logs/eval_b/final_b の結果（3 シード合計）。出力は --out-dir の PNG。
 """
@@ -23,7 +23,7 @@ SEVERITIES = (0.5, 0.4, 0.3, 0.25)
 
 
 def pooled(directory: Path, pattern: str, key) -> dict[str, dict[float, float]]:
-    """ファイル名の方式ごとに、強さ → 3 シード合計の割合。"""
+    """ファイル名の方式ごとに、倍率 s → 3 シード合計の割合。"""
     hits: dict[str, dict[float, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     for path in directory.glob(pattern):
         tag = path.stem.rsplit("-s", 1)[0]
@@ -77,14 +77,14 @@ def main() -> None:
     fall = pooled(REPO_ROOT / "logs" / "eval_a" / "final", "*.json", lambda t: t["outcome"] == "fell")
     fig, ax = plt.subplots(figsize=(7.2, 3.6))
     grouped_bars(ax, fall, {"nominal": "通常版", "nominal_slow0.4": "通常版 + 不調時に減速（× 0.4）",
-                            "proposed": "提案版（不調を入れて学習）"}, "転倒率（不調から 40 s）")
+                            "proposed": "提案版（不調を再現した条件で学習）"}, "転倒率（不調発生から 40 s）")
     ax.set_title("評価A: 帰還させずに巡回を続けたときの転倒率（3 シード × 4 脚 × 100 試行）", color=TEXT, fontsize=11, pad=24)
     save(fig, out_dir / "eval_a_fall.png")
 
     success = pooled(REPO_ROOT / "logs" / "eval_b" / "final_b", "proposed-*.json", lambda t: t["outcome"] == "success")
     fig, ax = plt.subplots(figsize=(7.2, 3.6))
     grouped_bars(ax, success, {"proposed-none": "検知なし（1 周して自然に帰還）", "proposed-detector": "検知器で帰還",
-                               "proposed-oracle": "正解通知で即帰還"}, "帰還成功率（不調から 40 s 以内）")
+                               "proposed-oracle": "正解通知で即帰還"}, "帰還成功率（不調発生から 40 s 以内）")
     ax.set_title("評価B: 提案版の帰還成功率（3 シード × 4 脚 × 100 試行）", color=TEXT, fontsize=11, pad=24)
     save(fig, out_dir / "eval_b_success.png")
 
