@@ -1,4 +1,4 @@
-"""検知器の確認（シミュレーションなし）: 合成した追従誤差で、発報の条件と脚の判定を確かめる。"""
+"""検知器の確認（シミュレーションなし）: 合成した追従誤差で、発報の条件と脚の記録を確かめる。"""
 
 import sys
 from pathlib import Path
@@ -9,18 +9,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from detector import DetectorConfig, LegFaultDetector  # noqa: E402
 
 DT = 0.02
-BASE_ERR = 0.05
-CFG = DetectorConfig(tau_s=0.1, hold_s=0.2, is_relative=True, threshold=0.03, warmup_s=1.0)
+BASELINE = (0.25, 0.24, 0.23, 0.21)
+CFG = DetectorConfig(tau_s=0.1, hold_s=0.2, threshold=0.03, warmup_s=1.0)
+INSTANT = DetectorConfig(tau_s=1e-9, hold_s=CFG.hold_s, threshold=CFG.threshold, warmup_s=0.0)
+
+
+def shifted(leg: int, delta: float) -> torch.Tensor:
+    err = torch.tensor([BASELINE])
+    err[0, leg] += delta
+    return err
 
 
 def run(cfg: DetectorConfig, err: torch.Tensor, is_active: torch.Tensor, steps: int, t0: float = 0.0):
-    """同じ誤差 (n, 4) を steps 回入れ、最初に発報したステップ（なければ -1）と判定した脚を返す。"""
-    detector = LegFaultDetector(cfg, err.shape[0], DT, "cpu")
-    first = torch.full((err.shape[0],), -1)
+    """同じ誤差 (1, 4) を steps 回入れ、最初に発報したステップ（なければ -1）と記録した脚を返す。"""
+    detector = LegFaultDetector(cfg, BASELINE, 1, DT, "cpu")
+    first = -1
     for k in range(steps):
-        is_new = detector.update(err, is_active, t0 + k * DT)
-        first = torch.where(is_new, k, first)
-    return first, detector.leg
+        if detector.update(err, is_active, t0 + k * DT).item() and first < 0:
+            first = k
+    return first, int(detector.leg.item())
 
 
 def main() -> None:
@@ -31,39 +38,38 @@ def main() -> None:
         print(f"[{'PASS' if ok else 'FAIL'}] {name} {detail}")
 
     active = torch.ones(1, dtype=torch.bool)
-    rl_high = torch.tensor([[BASE_ERR, BASE_ERR, BASE_ERR, BASE_ERR + 0.1]])
-    first, leg = run(CFG, rl_high, active, 200, t0=CFG.warmup_s)
-    check("one leg with sustained error fires", first.item() >= 0, f"step {first.item()}")
-    check("fired leg is RL", leg.item() == 3, f"leg {leg.item()}")
+    first, _ = run(CFG, torch.tensor([BASELINE]), active, 200, t0=CFG.warmup_s)
+    check("baseline error never fires", first == -1)
 
-    all_high = torch.full((1, 4), BASE_ERR + 0.1)
-    first, _ = run(CFG, all_high, active, 200, t0=CFG.warmup_s)
-    check("relative: all legs up together does not fire", first.item() == -1)
+    first, leg = run(CFG, shifted(2, 0.1), active, 200, t0=CFG.warmup_s)
+    check("one leg above baseline fires", first >= 0, f"step {first}")
+    check("records the leg with the largest deviation (RR)", leg == 2, f"leg {leg}")
 
-    absolute = DetectorConfig(CFG.tau_s, CFG.hold_s, False, BASE_ERR + 0.05, CFG.warmup_s)
-    first, _ = run(absolute, all_high, active, 200, t0=CFG.warmup_s)
-    check("absolute: all legs up together fires", first.item() >= 0)
+    first, leg = run(CFG, shifted(1, -0.1), active, 200, t0=CFG.warmup_s)
+    check("a drop below baseline also fires", first >= 0 and leg == 1, f"step {first}, leg {leg}")
 
-    first, _ = run(CFG, rl_high, torch.zeros(1, dtype=torch.bool), 200, t0=CFG.warmup_s)
-    check("inactive (not patrolling) never fires", first.item() == -1)
+    first, _ = run(CFG, shifted(2, 0.02), active, 200, t0=CFG.warmup_s)
+    check("deviation under the threshold does not fire", first == -1)
 
-    first, _ = run(CFG, rl_high, active, round(CFG.warmup_s / DT) - 1)
-    check("no fire before warmup", first.item() == -1)
+    first, _ = run(CFG, shifted(2, 0.1), torch.zeros(1, dtype=torch.bool), 200, t0=CFG.warmup_s)
+    check("inactive (not patrolling) never fires", first == -1)
+
+    first, _ = run(CFG, shifted(2, 0.1), active, round(CFG.warmup_s / DT) - 1)
+    check("no fire before warmup", first == -1)
 
     hold_steps = round(CFG.hold_s / DT)
-    instant = DetectorConfig(1e-9, CFG.hold_s, True, CFG.threshold, 0.0)
-    first, _ = run(instant, rl_high, active, 200)
-    check("fires exactly after hold_s", first.item() == hold_steps - 1, f"step {first.item()} (hold {hold_steps})")
+    first, _ = run(INSTANT, shifted(2, 0.1), active, 200)
+    check("fires exactly after hold_s", first == hold_steps - 1, f"step {first} (hold {hold_steps})")
 
-    detector = LegFaultDetector(instant, 1, DT, "cpu")
+    detector = LegFaultDetector(INSTANT, BASELINE, 1, DT, "cpu")
     fired = 0
     for k in range(200):
-        err = rl_high if (k // (hold_steps - 1)) % 2 == 0 else torch.full((1, 4), BASE_ERR)
+        err = shifted(2, 0.1) if (k // (hold_steps - 1)) % 2 == 0 else torch.tensor([BASELINE])
         fired += int(detector.update(err, active, k * DT).item())
     check("interrupted excess restarts the hold count", fired == 0)
 
-    detector = LegFaultDetector(instant, 1, DT, "cpu")
-    fired = sum(int(detector.update(rl_high, active, k * DT).item()) for k in range(200))
+    detector = LegFaultDetector(INSTANT, BASELINE, 1, DT, "cpu")
+    fired = sum(int(detector.update(shifted(2, 0.1), active, k * DT).item()) for k in range(200))
     check("fires only once per trial", fired == 1, f"{fired}")
 
     print(f"{sum(results)}/{len(results)} checks passed")

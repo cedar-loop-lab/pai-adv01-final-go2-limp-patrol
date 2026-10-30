@@ -5,7 +5,7 @@
 通知の条件:
   none   : 通知しない。1周を終えれば自然に帰還する
   oracle : 劣化を入れた時点で帰還を通知する（正解通知。固定した帰還ルールの参照条件で、最適な行動の上限ではない）
-  detector: 巡回中に検知器（detector.py。設定は val で決めて固定した DETECTOR_CFG）が劣化を判定した時点で帰還を通知する
+  detector: 巡回中に検知器（detector.py。設定と較正値は val で決めて固定した detector_calib.json）が劣化を判定した時点で帰還を通知する
 成功 = 劣化（起点）から DEADLINE_S 秒以内に帰還完了（半径 r 以内かつ低速を連続 hold_s 秒）し、それまで転倒しないこと。
 自然に1周を終えて帰還した場合も成功に数える。分母は試行表の全試行（通知前の転倒・未通知・誤報も含める）。
 失敗は、転倒（局面つき）・停止保持の失敗（基地に着いたが完了せず）・巡回中・帰還途中・起点前の帰還（誤報）に分ける。
@@ -20,7 +20,7 @@ import torch
 
 import genesis as gs
 
-from detector import DETECTOR_CFG, DetectorConfig, LegFaultDetector, leg_error
+from detector import CALIB_PATH, LegFaultDetector, leg_error, load_calibration
 from eval_common import (
     LEG_NAMES, REPO_ROOT, degraded_limit, is_fallen, load_env_and_policy, motion_label, reset_from_table,
 )
@@ -33,12 +33,12 @@ EXP_NAMES = {"proposed": "go2-degr-h10-s{}", "nominal": "go2-nominal-h10-s{}"}
 CKPT = 999
 
 
-def simulate(env, policy, trials: list[dict], notify: str, detector_cfg: DetectorConfig | None = None,
+def simulate(env, policy, trials: list[dict], notify: str, detector_calib: tuple | None = None,
              trace: dict | None = None) -> dict:
     """trace に dict を渡すと、ステップごとの脚の追従誤差と巡回中かどうかを記録する（検知器の設定を決める用）。"""
     n = len(trials)
     mission = PatrolMission(MissionConfig(), n, env.dt)
-    detector = LegFaultDetector(detector_cfg, n, env.dt, gs.device) if notify == "detector" else None
+    detector = LegFaultDetector(*detector_calib, n, env.dt, gs.device) if notify == "detector" else None
     if trace is not None:
         trace.update(leg_err=[], is_active=[])
     cfg = mission.cfg
@@ -178,14 +178,15 @@ def main() -> None:
     parser.add_argument("--train-seed", type=int, required=True)
     parser.add_argument("--table", type=str, required=True)
     args = parser.parse_args()
-    if args.notify == "detector" and DETECTOR_CFG is None:
-        parser.error("DETECTOR_CFG is not fixed yet (run select_detector.py on val first)")
+    if args.notify == "detector" and not CALIB_PATH.exists():
+        parser.error("detector_calib.json is not fixed yet (run select_detector.py on val first)")
 
     table = json.loads((REPO_ROOT / "genesis_env" / "trial_tables" / f"{args.table}.json").read_text())
     trials = table["trials"]
     exp = EXP_NAMES[args.policy].format(args.train_seed)
+    calib = load_calibration(exp) if args.notify == "detector" else None
     env, policy, _ = load_env_and_policy(exp, CKPT, len(trials), MAX_TIME_S, seed=table["seed"])
-    rec = simulate(env, policy, trials, args.notify, DETECTOR_CFG)
+    rec = simulate(env, policy, trials, args.notify, calib)
     records = per_trial_records(rec, trials)
     rows = summarize(records)
 
@@ -196,7 +197,7 @@ def main() -> None:
     meta = {"policy": args.policy, "notify": args.notify, "exp": exp, "ckpt": CKPT, "train_seed": args.train_seed,
             "table": args.table, "table_seed": table["seed"], "deadline_s": DEADLINE_S,
             "mission": MissionConfig().__dict__,
-            "detector": DETECTOR_CFG.__dict__ if args.notify == "detector" else None}
+            "detector": {"cfg": calib[0].__dict__, "baseline": calib[1]} if calib else None}
     out.write_text(json.dumps({**meta, "summary": rows, "trials": records}, indent=1))
     for row in rows:
         if row["leg"] in (None, "all"):
